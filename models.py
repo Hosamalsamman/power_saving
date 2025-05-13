@@ -1,5 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase
+from flask_login import UserMixin
 
 
 class Base(DeclarativeBase):
@@ -193,7 +194,7 @@ class GroupPermission(db.Model):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
 
-class User(db.Model):
+class User(UserMixin, db.Model):
     __tablename__ = 'users'
     emp_code = db.Column(db.String(8), primary_key=True)
     emp_name = db.Column(db.String(400), nullable=False, unique=True)
