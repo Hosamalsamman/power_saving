@@ -151,6 +151,7 @@ def technologies():
 @app.route("edit-tech/<tech_id>", methods=["GET", "POST"])
 def edit_tech(tech_id):
     tech = Technology.query.get(tech_id)
+    current_user_permissions = [permission.to_dict() for permission in current_user.group.permissions]
     if request.method == "POST":
         tech.technology_name = request.form.get('technology_name')
         tech.power_per_water = request.form.get('power_per_water')
@@ -180,11 +181,12 @@ def edit_tech(tech_id):
                     "success": "تم تعديل بيانات تقنية الترشيح بنجاح"
                 }
             }), 200
-    return jsonify(tech.to_dict())
+    return jsonify(current_tech=tech.to_dict(), current_user_permissions=current_user_permissions)
 
 
 @app.route("/new-tech", methods=["GET", "POST"])
 def add_new_tech():
+    current_user_permissions = [permission.to_dict() for permission in current_user.group.permissions]
     if request.method == "POST":
         new_tech = Technology(
             technology_name=request.form.get('technology_name'),
@@ -218,6 +220,8 @@ def add_new_tech():
                 }
             }
             return jsonify(response), 200
+    return jsonify(current_user_permissions=current_user_permissions)
+
 
 
 if __name__ == '__main__':
