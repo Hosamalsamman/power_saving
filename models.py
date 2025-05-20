@@ -1,7 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase, relationship
-from sqlalchemy import Column, Integer, SmallInteger, BigInteger, String, Boolean, Float, ForeignKey, NVARCHAR, SmallInteger
-from sqlalchemy.dialects.mssql import MONEY
+from sqlalchemy import Column, Integer, SmallInteger, BigInteger, String, Boolean, Float, ForeignKey, NVARCHAR, SmallInteger, Numeric
 
 
 class Base(DeclarativeBase):
@@ -69,7 +68,7 @@ class Voltage(db.Model):
     __tablename__ = 'voltage'
     voltage_id = db.Column(SmallInteger, primary_key=True)
     voltage_type = db.Column(NVARCHAR(50), nullable=False)
-    voltage_cost = db.Column(MONEY, nullable=False)
+    voltage_cost = db.Column(Numeric(19, 4), nullable=False)
 
     guages = db.relationship('Gauge', back_populates='voltage')
     bills = db.relationship('GuageBill', back_populates='voltage')
@@ -126,14 +125,14 @@ class GuageBill(db.Model):
     reading_factor = db.Column(Integer, nullable=False)
     power_consump = db.Column(BigInteger, nullable=False)
     voltage_id = db.Column(SmallInteger, db.ForeignKey('voltage.voltage_id'), nullable=False)
-    voltage_cost = db.Column(MONEY, nullable=False)
-    consump_cost = db.Column(MONEY, nullable=False)
-    fixed_installment = db.Column(MONEY, nullable=False)
-    settlements = db.Column(MONEY, nullable=False)
-    stamp = db.Column(MONEY, nullable=False)
-    prev_payments = db.Column(MONEY, nullable=False)
+    voltage_cost = db.Column(Numeric(19, 4), nullable=False)
+    consump_cost = db.Column(Numeric(19, 4), nullable=False)
+    fixed_installment = db.Column(Numeric(19, 4), nullable=False)
+    settlements = db.Column(Numeric(19, 4), nullable=False)
+    stamp = db.Column(Numeric(19, 4), nullable=False)
+    prev_payments = db.Column(Numeric(19, 4), nullable=False)
     rounding = db.Column(Float, nullable=False)
-    bill_total = db.Column(MONEY, nullable=False)
+    bill_total = db.Column(Numeric(19, 4), nullable=False)
 
     guage = db.relationship('Gauge', back_populates='bills')
     voltage = db.relationship('Voltage', back_populates='bills')
@@ -154,7 +153,7 @@ class TechnologyBill(db.Model):
     technology_solid_chlorine_consump = db.Column(BigInteger)
     technology_alum_consump = db.Column(BigInteger)
     technology_water_amount = db.Column(BigInteger)
-    technology_bill_total = db.Column(MONEY, nullable=False)
+    technology_bill_total = db.Column(Numeric(19, 4), nullable=False)
 
     guage_bill = db.relationship('GuageBill', back_populates='technology_bills')
     station_tech = db.relationship('StationGaugeTechnology', back_populates='bills')
