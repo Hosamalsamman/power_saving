@@ -68,14 +68,14 @@ def edit_station(station_id):
     sources = db.session.query(WaterSource).all()
     sources_list = [source.to_dict() for source in sources]
     if request.method == "POST":
-        try:
-            station.station_name = request.form.get('name')
-            station.branch_id = request.form.get('branch_id')
-            station.station_type = request.form.get('station_type')
-            station.station_water_capacity = request.form.get('station_water_capacity')
-            station.water_source_id = request.form.get('water_source_id')
-            station.station_status = request.form.get('station_status')
+        station.station_name = request.form.get('name')
+        station.branch_id = request.form.get('branch_id')
+        station.station_type = request.form.get('station_type')
+        station.station_water_capacity = request.form.get('station_water_capacity')
+        station.water_source_id = request.form.get('water_source_id')
+        station.station_status = request.form.get('station_status')
 
+        try:
             db.session.commit()
         except IntegrityError as e:
             db.session.rollback()
@@ -115,8 +115,8 @@ def add_new_station():
             water_source_id=request.form.get('water_source_id'),
             station_status=request.form.get('station_status')
         )
+        db.session.add(new_station)
         try:
-            db.session.add(new_station)
             db.session.commit()
         except IntegrityError as e:
             db.session.rollback()
@@ -148,7 +148,7 @@ def technologies():
     return jsonify(techs_list)
 
 
-@app.route("edit-tech/<tech_id>", methods=["GET", "POST"])
+@app.route("/edit-tech/<tech_id>", methods=["GET", "POST"])
 def edit_tech(tech_id):
     tech = Technology.query.get(tech_id)
     current_user_permissions = [permission.to_dict() for permission in current_user.group.permissions]
@@ -197,8 +197,8 @@ def add_new_tech():
             new_tech.solid_alum_per_water = float(request.form.get('solid_alum_per_water')) or None,
             new_tech.chlorine_per_water = float(request.form.get('chlorine_per_water')) or None
 
+        db.session.add(new_tech)
         try:
-            db.session.add(new_tech)
             db.session.commit()
         except IntegrityError as e:
             db.session.rollback()
@@ -222,6 +222,86 @@ def add_new_tech():
             return jsonify(response), 200
     return jsonify(current_user_permissions=current_user_permissions)
 
+
+@app.route("/gauges")
+def gauges():
+    all_gauges = db.session.query(Gauge).all()
+    gauges_list = [gauge.to_dict() for gauge in all_gauges]
+    return jsonify(gauges_list)
+
+
+@app.route("/edit-gauge/<gauge_id>", methods=["GET", "POST"])
+def edit_gauge(gauge_id):
+    gauge = Gauge.query.get(gauge_id)
+    voltage_types = db.session.query(Voltage).all()
+    v_t_list = [v_t.to_dict() for v_t in voltage_types]
+    if request.method == "POST":
+        gauge.meter_id = request.form.get('meter_id')
+        gauge.meter_factor = request.form.get('meter_factor')
+        gauge.voltage_id = request.form.get('voltage_id')
+        gauge.account_status = request.form.get('account_status')
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            return jsonify({
+                "response": {
+                    "success": "تم تعديل بيانات العداد بنجاح"
+                }
+            }), 200
+    return jsonify(current_gauge=gauge.to_dict(), voltage_types=v_t_list)
+
+
+@app.route("/new-gauge", methods=["GET", "POST"])
+def add_new_gauge():
+    voltage_types = db.session.query(Voltage).all()
+    v_t_list = [v_t.to_dict() for v_t in voltage_types]
+    if request.method == "POST":
+        new_gauge = Gauge(
+            account_number=request.form.get('account_number'),
+            meter_id=request.form.get('meter_id'),
+            meter_factor=request.form.get('meter_factor'),
+            final_reading=request.form.get('final_reading'),
+            voltage_id=request.form.get('voltage_id'),
+            account_status=request.form.get('account_status')
+        )
+        db.session.add(new_gauge)
+
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم إضافة العداد بنجاح"
+                }
+            }
+            return jsonify(response), 200
+    return jsonify(voltage_types=v_t_list)
 
 
 if __name__ == '__main__':

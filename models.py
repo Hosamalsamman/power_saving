@@ -71,13 +71,13 @@ class Voltage(db.Model):
     voltage_type = db.Column(NVARCHAR(50), nullable=False)
     voltage_cost = db.Column(MONEY, nullable=False)
 
-    guages = db.relationship('Guage', back_populates='voltage')
+    guages = db.relationship('Gauge', back_populates='voltage')
     bills = db.relationship('GuageBill', back_populates='voltage')
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
-class Guage(db.Model):
+class Gauge(db.Model):
     __tablename__ = 'guages'
     account_number = db.Column(NVARCHAR(50), primary_key=True)
     meter_id = db.Column(NVARCHAR(50), unique=True)
@@ -105,7 +105,7 @@ class StationGaugeTechnology(db.Model):
 
     station = db.relationship('Station', back_populates='station_techs')
     technology = db.relationship('Technology', back_populates='station_techs')
-    guage = db.relationship('Guage', back_populates='station_techs')
+    guage = db.relationship('Gauge', back_populates='station_techs')
     bills = db.relationship('TechnologyBill', back_populates='station_tech')
 
     def to_dict(self):
@@ -135,7 +135,7 @@ class GuageBill(db.Model):
     rounding = db.Column(Float, nullable=False)
     bill_total = db.Column(MONEY, nullable=False)
 
-    guage = db.relationship('Guage', back_populates='bills')
+    guage = db.relationship('Gauge', back_populates='bills')
     voltage = db.relationship('Voltage', back_populates='bills')
     technology_bills = db.relationship('TechnologyBill', back_populates='guage_bill')
 
