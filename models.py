@@ -101,6 +101,7 @@ class StationGaugeTechnology(db.Model):
     station_id = db.Column(SmallInteger, db.ForeignKey('stations.station_id'), primary_key=True)
     technology_id = db.Column(SmallInteger, db.ForeignKey('technologies.technology_id'), primary_key=True)
     account_number = db.Column(NVARCHAR(50), db.ForeignKey('guages.account_number'), primary_key=True)
+    relation_status = db.Column(Boolean, nullable=False)
 
     station = db.relationship('Station', back_populates='station_techs')
     technology = db.relationship('Technology', back_populates='station_techs')
@@ -124,8 +125,8 @@ class GuageBill(db.Model):
     current_reading = db.Column(BigInteger, nullable=False)
     reading_factor = db.Column(Integer, nullable=False)
     power_consump = db.Column(BigInteger, nullable=False)
-    voltage_id = db.Column(SmallInteger, db.ForeignKey('voltage.voltage_id'), nullable=False)
-    voltage_cost = db.Column(Numeric(19, 4), nullable=False)
+    voltage_id = db.Column(SmallInteger, db.ForeignKey('voltage.voltage_id'), nullable=True)
+    voltage_cost = db.Column(Numeric(19, 4), nullable=True)
     consump_cost = db.Column(Numeric(19, 4), nullable=False)
     fixed_installment = db.Column(Numeric(19, 4), nullable=False)
     settlements = db.Column(Numeric(19, 4), nullable=False)

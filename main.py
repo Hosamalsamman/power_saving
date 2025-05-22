@@ -304,5 +304,151 @@ def add_new_gauge():
     return jsonify(voltage_types=v_t_list)
 
 
+@app.route("/stg-relations")
+def stg_relations():
+    all_stgs = db.session.query(StationGaugeTechnology).all()
+    stgs_list = [stg.to_dict() for stg in all_stgs]
+    return jsonify(stgs_list)
+
+
+@app.route("/new-relation", methods=["GET", "POST"])
+def add_new_stg():
+    all_stations = db.session.query(Station).all()
+    stations_list = [station.to_dict() for station in all_stations]
+
+    all_gauges = db.session.query(Gauge).all()
+    gauges_list = [gauge.to_dict() for gauge in all_gauges]
+
+    all_techs = db.session.query(Technology).all()
+    techs_list = [tech.to_dict() for tech in all_techs]
+
+    if request.method == "POST":
+        new_stg = StationGaugeTechnology(
+            station_id=request.form.get('station_id'),
+            technology_id=request.form.get('technology_id'),
+            account_number=request.form.get('account_number'),
+            relation_status=True
+        )
+        db.session.add(new_stg)
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم ربط البيانات بنجاح"
+                }
+            }
+            return jsonify(response), 200
+
+    return jsonify(stations=stations_list, gauges=gauges_list, techs=techs_list)
+
+
+@app.route("/cancel-relation/<relation_id>")
+def cancel_relation(relation_id):
+    current_relation = StationGaugeTechnology.query.get(relation_id)
+    if not current_relation.bills:
+        db.session.delete(current_relation)
+    else:
+        current_relation.relation_status = False
+
+    try:
+        db.session.commit()
+    except IntegrityError as e:
+        db.session.rollback()
+        return jsonify(
+            {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+    except DataError as e:
+        db.session.rollback()
+        return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+    else:
+        response = {
+            "response": {
+                "success": "تم إلغاء ربط البيانات بنجاح"
+            }
+        }
+        return jsonify(response), 200
+
+
+@app.route("/new-bill", methods=["GET", "POST"])
+def add_new_bill():
+    if request.method == "POST":
+        new_bill = GuageBill(
+            account_number=request.form.get('account_number'),
+            bill_month=request.form.get('bill_month'),
+            bill_year=request.form.get('bill_year'),
+            prev_reading=request.form.get('prev_reading'),
+            current_reading=request.form.get('current_reading'),
+            reading_factor=request.form.get('reading_factor'),
+            power_consump=request.form.get('power_consump'),
+            consump_cost=request.form.get('consump_cost'),
+            fixed_installment=request.form.get('fixed_installment'),
+            settlements=request.form.get('settlements'),
+            stamp=request.form.get('stamp'),
+            prev_payments=request.form.get('prev_payments'),
+            rounding=request.form.get('rounding'),
+            bill_total=request.form.get('bill_total')
+        )
+        new_bill.voltage_id = new_bill.voltage.voltage_id
+        new_bill.voltage_cost = new_bill.voltage.voltage_cost
+        # check prev-reading
+        if new_bill.prev_reading != new_bill.guage.final_reading:
+            return jsonify({"error": "القراءة السابقة غير مطابقة لآخر قراءة مسجلة لدينا"}), 400
+        # check reading factor
+        if new_bill.reading_factor != new_bill.guage.reading_factor:
+            return jsonify({"error": "معامل العداد غير مطابق لبيانات العداد المسجلة لدينا"}), 400
+        # check bill total
+        calculated_bill_total = (new_bill.current_reading - new_bill.prev_reading) * new_bill.reading_factor * new_bill.voltage_cost + new_bill.fixed_installment + new_bill.settlements + new_bill.stamp - new_bill.prev_payments + new_bill.rounding
+        if int(calculated_bill_total) != int(new_bill.bill_total):
+            return jsonify({"error": "إجمالي الفاتورة غير مطابق لمجموع البنود المدخلة"})
+        db.session.add(new_bill)
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            new_bill.guage.final_reading = new_bill.current_reading
+            db.session.commit()
+            # TODO: search station gauge technology relation then insert in technology bill the corresponging data
+            response = {
+                "response": {
+                    "success": "تم إضافة الفاتورة بنجاح"
+                }
+            }
+            return jsonify(response), 200
+    return jsonify({"response": "يرجى التأكد من بيانات الفاتورة المدخلة قبل الحفظ حيث أنه لا يمكن تعديل أو حذف الفواتير"})
+
+
+
+
 if __name__ == '__main__':
     app.run(debug=True)
