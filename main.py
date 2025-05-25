@@ -1,7 +1,7 @@
 import os
 from flask import Flask, jsonify, render_template, request
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, DataError
-
+from flask_cors import CORS
 from models import *
 from flask_login import login_user, LoginManager, current_user, logout_user
 from dotenv import load_dotenv
@@ -21,9 +21,12 @@ pip3 install -r requirements.txt
 
 This will install the packages from requirements.txt for this project.
 '''
+
 load_dotenv()
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv("FLASK_KEY")
+CORS(app)
+CORS(app, origins=["http://localhost:5000"])
 
 # Configure Flask-Login
 login_manager = LoginManager()
@@ -399,7 +402,7 @@ def add_new_bill():
             current_reading=request.form.get('current_reading'),
             reading_factor=request.form.get('reading_factor'),
             power_consump=request.form.get('power_consump'),
-            consump_cost=request.form.get('consump_cost'),
+            # consump_cost=request.form.get('consump_cost'),
             fixed_installment=request.form.get('fixed_installment'),
             settlements=request.form.get('settlements'),
             stamp=request.form.get('stamp'),
@@ -417,6 +420,7 @@ def add_new_bill():
             return jsonify({"error": "معامل العداد غير مطابق لبيانات العداد المسجلة لدينا"}), 400
         # check bill total
         calculated_bill_total = (new_bill.current_reading - new_bill.prev_reading) * new_bill.reading_factor * new_bill.voltage_cost + new_bill.fixed_installment + new_bill.settlements + new_bill.stamp - new_bill.prev_payments + new_bill.rounding
+
         if int(calculated_bill_total) != int(new_bill.bill_total):
             return jsonify({"error": "إجمالي الفاتورة غير مطابق لمجموع البنود المدخلة"})
         db.session.add(new_bill)
@@ -447,8 +451,8 @@ def add_new_bill():
             return jsonify(response), 200
     return jsonify({"response": "يرجى التأكد من بيانات الفاتورة المدخلة قبل الحفظ حيث أنه لا يمكن تعديل أو حذف الفواتير"})
 
-
+# TODO: Add route to change voltage cost
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
