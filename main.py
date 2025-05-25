@@ -451,7 +451,44 @@ def add_new_bill():
             return jsonify(response), 200
     return jsonify({"response": "يرجى التأكد من بيانات الفاتورة المدخلة قبل الحفظ حيث أنه لا يمكن تعديل أو حذف الفواتير"})
 
-# TODO: Add route to change voltage cost
+
+# Add route to change voltage cost
+@app.route("/voltage-costs")
+def voltage_costs():
+    all_costs = db.session.query.get(Voltage).all()
+    costs_list = [v_c.to_dict() for v_c in all_costs]
+    return jsonify(costs_list)
+
+
+@app.route("/edit-v-cost/<voltage_id>", methods=["get", "post"])
+def edit_voltage_cost(voltage_id):
+    voltage = Voltage.query.get(voltage_id)
+    if request.method == "POST":
+        voltage.voltage_cost = request.form.get('voltage_cost')
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم تعديل التعريفة بنجاح"
+                }
+            }
+            return jsonify(response), 200
+
+    return jsonify(voltage.to_dict())
 
 
 if __name__ == '__main__':

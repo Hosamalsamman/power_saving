@@ -64,6 +64,7 @@ class Station(db.Model):
         data.pop('water_source_id', None)
         return data
 
+
 class Voltage(db.Model):
     __tablename__ = 'voltage'
     voltage_id = db.Column(SmallInteger, primary_key=True)
