@@ -1,6 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase, relationship
-from sqlalchemy import Column, Integer, SmallInteger, BigInteger, String, Boolean, Float, ForeignKey, NVARCHAR, SmallInteger, Numeric
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Float, ForeignKey, NVARCHAR, Numeric
 
 
 class Base(DeclarativeBase):
@@ -10,7 +10,7 @@ db = SQLAlchemy(model_class=Base)
 
 class Branch(db.Model):
     __tablename__ = 'branches'
-    branch_id = db.Column(SmallInteger, primary_key=True)
+    branch_id = db.Column(Integer, primary_key=True)
     branch_name = db.Column(NVARCHAR(200), unique=True, nullable=False)
 
     stations = db.relationship('Station', back_populates='branch')
@@ -20,7 +20,7 @@ class Branch(db.Model):
 
 class Technology(db.Model):
     __tablename__ = 'technologies'
-    technology_id = db.Column(SmallInteger, primary_key=True)
+    technology_id = db.Column(Integer, primary_key=True)
     technology_name = db.Column(NVARCHAR(200), unique=True, nullable=False)
     power_per_water = db.Column(Float, nullable=False)
     liquid_alum_per_water = db.Column(Float)
@@ -28,13 +28,14 @@ class Technology(db.Model):
     chlorine_per_water = db.Column(Float)
 
     station_techs = db.relationship('StationGaugeTechnology', back_populates='technology')
+    technology_bills = db.relationship('TechnologyBill', back_populates='technology')
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
 class WaterSource(db.Model):
     __tablename__ = 'water_source'
-    water_source_id = db.Column(SmallInteger, primary_key=True)
+    water_source_id = db.Column(Integer, primary_key=True)
     water_source_name = db.Column(NVARCHAR(400), unique=True, nullable=False)
 
     stations = db.relationship('Station', back_populates='water_source')
@@ -44,17 +45,18 @@ class WaterSource(db.Model):
 
 class Station(db.Model):
     __tablename__ = 'stations'
-    station_id = db.Column(SmallInteger, primary_key=True)
+    station_id = db.Column(Integer, primary_key=True, autoincrement=True)
     station_name = db.Column(NVARCHAR(200), unique=True, nullable=False)
-    branch_id = db.Column(SmallInteger, db.ForeignKey('branches.branch_id'), nullable=False)
+    branch_id = db.Column(Integer, db.ForeignKey('branches.branch_id'), nullable=False)
     station_type = db.Column(NVARCHAR(10), nullable=False)
     station_water_capacity = db.Column(Integer, nullable=False)
-    water_source_id = db.Column(SmallInteger, db.ForeignKey('water_source.water_source_id'), nullable=False)
+    water_source_id = db.Column(Integer, db.ForeignKey('water_source.water_source_id'), nullable=False)
     station_status = db.Column(Boolean, nullable=False)
 
     branch = db.relationship('Branch', back_populates='stations')
     water_source = db.relationship('WaterSource', back_populates='stations')
     station_techs = db.relationship('StationGaugeTechnology', back_populates='station')
+    technology_bills = db.relationship('TechnologyBill', back_populates='station')
 
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -67,7 +69,7 @@ class Station(db.Model):
 
 class Voltage(db.Model):
     __tablename__ = 'voltage'
-    voltage_id = db.Column(SmallInteger, primary_key=True)
+    voltage_id = db.Column(Integer, primary_key=True)
     voltage_type = db.Column(NVARCHAR(50), nullable=False)
     voltage_cost = db.Column(Numeric(19, 4), nullable=False)
 
@@ -83,7 +85,7 @@ class Gauge(db.Model):
     meter_id = db.Column(NVARCHAR(50), unique=True)
     meter_factor = db.Column(Integer, nullable=False)
     final_reading = db.Column(BigInteger, nullable=False)
-    voltage_id = db.Column(SmallInteger, db.ForeignKey('voltage.voltage_id'), nullable=False)
+    voltage_id = db.Column(Integer, db.ForeignKey('voltage.voltage_id'), nullable=False)
     account_status = db.Column(Boolean, nullable=False)
 
     voltage = db.relationship('Voltage', back_populates='guages')
@@ -99,9 +101,9 @@ class Gauge(db.Model):
 class StationGaugeTechnology(db.Model):
     __tablename__ = 'station_guage_technology'
     station_guage_technology_id = db.Column(Integer, unique=True, nullable=False)
-    station_id = db.Column(SmallInteger, db.ForeignKey('stations.station_id'), primary_key=True)
-    technology_id = db.Column(SmallInteger, db.ForeignKey('technologies.technology_id'), primary_key=True)
-    account_number = db.Column(NVARCHAR(50), db.ForeignKey('guages.account_number'))
+    station_id = db.Column(Integer, db.ForeignKey('stations.station_id'), primary_key=True)
+    technology_id = db.Column(Integer, db.ForeignKey('technologies.technology_id'), primary_key=True)
+    account_number = db.Column(NVARCHAR(50), db.ForeignKey('guages.account_number'), primary_key=True)
     relation_status = db.Column(Boolean, nullable=False)
 
     station = db.relationship('Station', back_populates='station_techs')
@@ -118,15 +120,15 @@ class StationGaugeTechnology(db.Model):
 
 class GuageBill(db.Model):
     __tablename__ = 'guage_bill'
-    guage_bill_id = db.Column(NVARCHAR(50), unique=True, nullable=False)
+    guage_bill_id = db.Column(Integer, unique=True, nullable=False)
     account_number = db.Column(NVARCHAR(50), db.ForeignKey('guages.account_number'), primary_key=True)
-    bill_month = db.Column(SmallInteger, primary_key=True)
-    bill_year = db.Column(SmallInteger, primary_key=True)
+    bill_month = db.Column(Integer, primary_key=True)
+    bill_year = db.Column(Integer, primary_key=True)
     prev_reading = db.Column(BigInteger, nullable=False)
     current_reading = db.Column(BigInteger, nullable=False)
     reading_factor = db.Column(Integer, nullable=False)
     power_consump = db.Column(BigInteger, nullable=False)
-    voltage_id = db.Column(SmallInteger, db.ForeignKey('voltage.voltage_id'), nullable=True)
+    voltage_id = db.Column(Integer, db.ForeignKey('voltage.voltage_id'), nullable=True)
     voltage_cost = db.Column(Numeric(19, 4), nullable=True)
     # consump_cost = db.Column(Numeric(19, 4), nullable=False)
     fixed_installment = db.Column(Numeric(19, 4), nullable=False)
@@ -144,6 +146,7 @@ class GuageBill(db.Model):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
         data['voltage_type'] = self.voltage.voltage_type if self.voltage else None
         return data
+
 
 class TechnologyBill(db.Model):
     __tablename__ = 'technology_bill'
@@ -165,10 +168,9 @@ class TechnologyBill(db.Model):
         data['station_name'] = self.station_tech.station.station_name if self.station_tech else None
         data['technology_name'] = self.station_tech.technology.technology_name if self.station_tech else None
         return data
-
 class Group(db.Model):
     __tablename__ = 'groups'
-    group_id = db.Column(SmallInteger, primary_key=True)
+    group_id = db.Column(Integer, primary_key=True)
     group_name = db.Column(NVARCHAR(400), unique=True, nullable=False)
     group_notification = db.Column(NVARCHAR(1000))
 
@@ -180,7 +182,7 @@ class Group(db.Model):
 
 class Permission(db.Model):
     __tablename__ = 'premessions'
-    permession_id = db.Column(SmallInteger, primary_key=True)
+    permession_id = db.Column(Integer, primary_key=True)
     permession_name = db.Column(NVARCHAR(400), unique=True, nullable=False)
 
     group_permissions = db.relationship('GroupPermission', back_populates='permission')
@@ -190,8 +192,8 @@ class Permission(db.Model):
 
 class GroupPermission(db.Model):
     __tablename__ = 'group_premessions'
-    group_id = db.Column(SmallInteger, db.ForeignKey('groups.group_id'), primary_key=True)
-    permession_id = db.Column(SmallInteger, db.ForeignKey('premessions.permession_id'), primary_key=True)
+    group_id = db.Column(Integer, db.ForeignKey('groups.group_id'), primary_key=True)
+    permession_id = db.Column(Integer, db.ForeignKey('premessions.permession_id'), primary_key=True)
 
     group = db.relationship('Group', back_populates='permissions')
     permission = db.relationship('Permission', back_populates='group_permissions')
@@ -210,7 +212,7 @@ class User(db.Model):
     emp_name = db.Column(NVARCHAR(400), unique=True, nullable=False)
     username = db.Column(NVARCHAR(30), unique=True)
     userpassword = db.Column(NVARCHAR(30), nullable=False)
-    group_id = db.Column(SmallInteger, db.ForeignKey('groups.group_id'), nullable=False)
+    group_id = db.Column(Integer, db.ForeignKey('groups.group_id'), nullable=False)
 
     group = db.relationship('Group', back_populates='users')
 

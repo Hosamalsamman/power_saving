@@ -5,6 +5,7 @@ from flask_cors import CORS
 from models import *
 from flask_login import login_user, LoginManager, current_user, logout_user
 from dotenv import load_dotenv
+
 # import secrets
 #
 # secret_key = secrets.token_hex(32)
@@ -110,6 +111,7 @@ def add_new_station():
     sources = db.session.query(WaterSource).all()
     sources_list = [source.to_dict() for source in sources]
     if request.method == "POST":
+        print(request.form.get('name'))
         new_station = Station(
             station_name=request.form.get('name'),
             branch_id=request.form.get('branch_id'),
@@ -332,6 +334,7 @@ def add_new_stg():
             account_number=request.form.get('account_number'),
             relation_status=True
         )
+
         db.session.add(new_stg)
         try:
             db.session.commit()
@@ -391,9 +394,15 @@ def cancel_relation(relation_id):
         return jsonify(response), 200
 
 
-@app.route("/new-bill", methods=["GET", "POST"])
-def add_new_bill():
+@app.route("/new-bill/<account_number>", methods=["GET", "POST"])
+def add_new_bill(account_number):
+    gauge_sgts = db.session.query(StationGaugeTechnology).filter(
+        (StationGaugeTechnology.account_number == account_number) & (
+                    StationGaugeTechnology.relation_status == True)).all()
+    gauge_sgt_list = [r.to_dict() for r in gauge_sgts]
     if request.method == "POST":
+        if not gauge_sgts:
+            return jsonify({"error": "هذا العداد غير مرتبط بمحطة، برجاء ربط العداد أولا"}), 400
         new_bill = GuageBill(
             account_number=request.form.get('account_number'),
             bill_month=request.form.get('bill_month'),
@@ -442,14 +451,34 @@ def add_new_bill():
         else:
             new_bill.guage.final_reading = new_bill.current_reading
             db.session.commit()
-            # TODO: search station gauge technology relation then insert in technology bill the corresponging data
+            # TODO: search station gauge technology relation then insert in technology bill the corresponding data
+            # one to one relations or many to one relations
+            if gauge_sgts.length == 1:
+                tech_bill = TechnologyBill(
+                    station_guage_technology_id=gauge_sgts[0].station_guage_technology_id,
+                    technology_bill_percentage=100,
+                    technology_power_consump=new_bill.power_consump,
+                    technology_bill_total=new_bill.bill_total
+                )
+                db.session.add(tech_bill)
+            # one to many and many to many relations
+            else:
+                for i in range(len(gauge_sgts)):
+                    tech_bill = TechnologyBill(
+                        station_guage_technology_id=gauge_sgts[i].station_guage_technology_id,
+                        technology_bill_percentage=request.form.get('percent')[i],
+                        technology_power_consump=new_bill.power_consump * request.form.get('percent')[i] / 100,
+                        technology_bill_total=new_bill.bill_total * request.form.get('percent')[i] / 100
+                    )
+                    db.session.add(tech_bill)
+            db.session.commit()
             response = {
                 "response": {
                     "success": "تم إضافة الفاتورة بنجاح"
                 }
             }
             return jsonify(response), 200
-    return jsonify({"response": "يرجى التأكد من بيانات الفاتورة المدخلة قبل الحفظ حيث أنه لا يمكن تعديل أو حذف الفواتير"})
+    return jsonify(gauge_sgt_list)
 
 
 # Add route to change voltage cost
