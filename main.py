@@ -396,6 +396,7 @@ def cancel_relation(relation_id):
 
 @app.route("/new-bill/<account_number>", methods=["GET", "POST"])
 def add_new_bill(account_number):
+    show_percent = False
     gauge_sgts = db.session.query(StationGaugeTechnology).filter(
         (StationGaugeTechnology.account_number == account_number) & (
                     StationGaugeTechnology.relation_status == True)).all()
@@ -451,26 +452,46 @@ def add_new_bill(account_number):
         else:
             new_bill.guage.final_reading = new_bill.current_reading
             db.session.commit()
-            # TODO: search station gauge technology relation then insert in technology bill the corresponding data
+            #  search station gauge technology relation then insert in technology bill the corresponding data
             # one to one relations or many to one relations
             if gauge_sgts.length == 1:
-                tech_bill = TechnologyBill(
-                    station_guage_technology_id=gauge_sgts[0].station_guage_technology_id,
-                    technology_bill_percentage=100,
-                    technology_power_consump=new_bill.power_consump,
-                    technology_bill_total=new_bill.bill_total
-                )
-                db.session.add(tech_bill)
+                # check if a single or multi gauges are providing for same tech
+                current_tech_bill = db.session.query(TechnologyBill).filter(TechnologyBill.station_id == gauge_sgts[0].station_id, TechnologyBill.technology_id == gauge_sgts[0].technology_id, TechnologyBill.bill_month == new_bill.bill_month, TechnologyBill.bill_year == new_bill.bill_year).first()
+                if current_tech_bill:
+                    current_tech_bill.technology_power_consump += new_bill.power_consump
+                    current_tech_bill.technology_bill_total += new_bill.bill_total
+                else:
+                    tech_bill = TechnologyBill(
+                        station_id=gauge_sgts[0].station_id,
+                        technology_id=gauge_sgts[0].technology_id,
+                        bill_month=new_bill.bill_month,
+                        bill_year=new_bill.bill_year,
+                        technology_bill_percentage=100,
+                        technology_power_consump=new_bill.power_consump,
+                        technology_bill_total=new_bill.bill_total
+                    )
+                    db.session.add(tech_bill)
             # one to many and many to many relations
             else:
                 for i in range(len(gauge_sgts)):
-                    tech_bill = TechnologyBill(
-                        station_guage_technology_id=gauge_sgts[i].station_guage_technology_id,
-                        technology_bill_percentage=request.form.get('percent')[i],
-                        technology_power_consump=new_bill.power_consump * request.form.get('percent')[i] / 100,
-                        technology_bill_total=new_bill.bill_total * request.form.get('percent')[i] / 100
-                    )
-                    db.session.add(tech_bill)
+                    # check if a single or multi gauges are providing for same tech
+                    current_tech_bill = db.session.query(TechnologyBill).filter(
+                        TechnologyBill.station_id == gauge_sgts[i].station_id,
+                        TechnologyBill.technology_id == gauge_sgts[i].technology_id,
+                        TechnologyBill.bill_month == new_bill.bill_month,
+                        TechnologyBill.bill_year == new_bill.bill_year).first()
+                    if current_tech_bill:
+                        current_tech_bill.technology_power_consump += new_bill.power_consump * current_tech_bill.technology_bill_percentage
+                        current_tech_bill.technology_bill_total += new_bill.bill_total * current_tech_bill.technology_bill_percentage
+                    else:
+                        show_percent = True
+                        tech_bill = TechnologyBill(
+                            station_guage_technology_id=gauge_sgts[i].station_guage_technology_id,
+                            technology_bill_percentage=request.form.get('percent')[i],
+                            technology_power_consump=new_bill.power_consump * request.form.get('percent')[i] / 100,
+                            technology_bill_total=new_bill.bill_total * request.form.get('percent')[i] / 100
+                        )
+                        db.session.add(tech_bill)
             db.session.commit()
             response = {
                 "response": {
@@ -478,7 +499,7 @@ def add_new_bill(account_number):
                 }
             }
             return jsonify(response), 200
-    return jsonify(gauge_sgt_list)
+    return jsonify(gauge_sgt_list, show_percent=show_percent)
 
 
 # Add route to change voltage cost

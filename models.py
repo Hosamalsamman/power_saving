@@ -150,8 +150,10 @@ class GuageBill(db.Model):
 
 class TechnologyBill(db.Model):
     __tablename__ = 'technology_bill'
-    guage_bill_id = db.Column(NVARCHAR(50), db.ForeignKey('guage_bill.guage_bill_id'), primary_key=True)
-    station_guage_technology_id = db.Column(Integer, db.ForeignKey('station_guage_technology.station_guage_technology_id'), primary_key=True)
+    bill_month = db.Column(Integer, primary_key=True)
+    bill_year = db.Column(Integer, primary_key=True)
+    station_id = db.Column(Integer, db.ForeignKey('stations.station_id'), primary_key=True)
+    technology_id = db.Column(Integer, db.ForeignKey('technologies.technology_id'), primary_key=True)
     technology_bill_percentage = db.Column(Float, nullable=False)
     technology_power_consump = db.Column(BigInteger, nullable=False)
     technology_liquid_chlorine_consump = db.Column(BigInteger)
