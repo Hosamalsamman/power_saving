@@ -399,7 +399,9 @@ def add_new_bill(account_number):
     show_percent = False
     gauge_sgts = db.session.query(StationGaugeTechnology).filter(
         (StationGaugeTechnology.account_number == account_number) & (
-                    StationGaugeTechnology.relation_status == True)).all()
+                    StationGaugeTechnology.relation_status is True)).all()
+    if len(gauge_sgts) > 1:
+        show_percent = True
     gauge_sgt_list = [r.to_dict() for r in gauge_sgts]
     if request.method == "POST":
         if not gauge_sgts:
@@ -481,10 +483,9 @@ def add_new_bill(account_number):
                         TechnologyBill.bill_month == new_bill.bill_month,
                         TechnologyBill.bill_year == new_bill.bill_year).first()
                     if current_tech_bill:
-                        current_tech_bill.technology_power_consump += new_bill.power_consump * current_tech_bill.technology_bill_percentage
-                        current_tech_bill.technology_bill_total += new_bill.bill_total * current_tech_bill.technology_bill_percentage
+                        current_tech_bill.technology_power_consump += new_bill.power_consump * request.form.get('percent')[i] / 100
+                        current_tech_bill.technology_bill_total += new_bill.bill_total * request.form.get('percent')[i] / 100
                     else:
-                        show_percent = True
                         tech_bill = TechnologyBill(
                             station_guage_technology_id=gauge_sgts[i].station_guage_technology_id,
                             technology_bill_percentage=request.form.get('percent')[i],
@@ -499,7 +500,7 @@ def add_new_bill(account_number):
                 }
             }
             return jsonify(response), 200
-    return jsonify(gauge_sgt_list, show_percent=show_percent)
+    return jsonify(gauge_sgt_list=gauge_sgt_list, show_percent=show_percent)
 
 
 # Add route to change voltage cost
