@@ -72,12 +72,12 @@ def edit_station(station_id):
     sources = db.session.query(WaterSource).all()
     sources_list = [source.to_dict() for source in sources]
     if request.method == "POST":
-        station.station_name = request.form.get('name')
-        station.branch_id = request.form.get('branch_id')
-        station.station_type = request.form.get('station_type')
-        station.station_water_capacity = request.form.get('station_water_capacity')
-        station.water_source_id = request.form.get('water_source_id')
-        station.station_status = request.form.get('station_status')
+        data = request.get_json()
+        station.station_name = data['name']
+        station.branch_id = data['branch_id']
+        station.station_type = data['station_type']
+        station.station_water_capacity = data['station_water_capacity']
+        station.water_source_id = data['water_source_id']
 
         try:
             db.session.commit()
@@ -111,14 +111,14 @@ def add_new_station():
     sources = db.session.query(WaterSource).all()
     sources_list = [source.to_dict() for source in sources]
     if request.method == "POST":
-        print(request.form.get('name'))
+        data = request.get_json()
+        print(data)
         new_station = Station(
-            station_name=request.form.get('name'),
-            branch_id=request.form.get('branch_id'),
-            station_type=request.form.get('station_type'),
-            station_water_capacity=request.form.get('station_water_capacity'),
-            water_source_id=request.form.get('water_source_id'),
-            station_status=request.form.get('station_status')
+            station_name=data['name'],
+            branch_id=data['branch_id'],
+            station_type=data['station_type'],
+            station_water_capacity=data['station_water_capacity'],
+            water_source_id=data['water_source_id'],
         )
         db.session.add(new_station)
         try:
@@ -158,12 +158,13 @@ def edit_tech(tech_id):
     tech = Technology.query.get(tech_id)
     current_user_permissions = [permission.to_dict() for permission in current_user.group.permissions]
     if request.method == "POST":
-        tech.technology_name = request.form.get('technology_name')
-        tech.power_per_water = request.form.get('power_per_water')
+        data = request.get_json()
+        tech.technology_name = data['technology_name']
+        tech.power_per_water = data['power_per_water']
         if any(p.permession_name == "set alum and chlorine" for p in current_user.group.permissions):
-            tech.liquid_alum_per_water = request.form.get('liquid_alum_per_water')
-            tech.solid_alum_per_water = request.form.get('solid_alum_per_water')
-            tech.chlorine_per_water = request.form.get('chlorine_per_water')
+            tech.liquid_alum_per_water = data['liquid_alum_per_water']
+            tech.solid_alum_per_water = data['solid_alum_per_water']
+            tech.chlorine_per_water = data['chlorine_per_water']
 
         try:
             db.session.commit()
@@ -193,14 +194,15 @@ def edit_tech(tech_id):
 def add_new_tech():
     current_user_permissions = [permission.to_dict() for permission in current_user.group.permissions]
     if request.method == "POST":
+        data = request.get_json()
         new_tech = Technology(
-            technology_name=request.form.get('technology_name'),
-            power_per_water=request.form.get('power_per_water'),
+            technology_name=data['technology_name'],
+            power_per_water=data['power_per_water'],
         )
         if any(p.permession_name == "set alum and chlorine" for p in current_user.group.permissions):
-            new_tech.liquid_alum_per_water = float(request.form.get('liquid_alum_per_water')) or None,
-            new_tech.solid_alum_per_water = float(request.form.get('solid_alum_per_water')) or None,
-            new_tech.chlorine_per_water = float(request.form.get('chlorine_per_water')) or None
+            new_tech.liquid_alum_per_water = data['liquid_alum_per_water'] or None,
+            new_tech.solid_alum_per_water = data['solid_alum_per_water'] or None,
+            new_tech.chlorine_per_water = data['chlorine_per_water'] or None
 
         db.session.add(new_tech)
         try:
@@ -241,10 +243,11 @@ def edit_gauge(gauge_id):
     voltage_types = db.session.query(Voltage).all()
     v_t_list = [v_t.to_dict() for v_t in voltage_types]
     if request.method == "POST":
-        gauge.meter_id = request.form.get('meter_id')
-        gauge.meter_factor = request.form.get('meter_factor')
-        gauge.voltage_id = request.form.get('voltage_id')
-        gauge.account_status = request.form.get('account_status')
+        data = request.get_json()
+        gauge.meter_id = data['meter_id']
+        gauge.meter_factor = data['meter_factor']
+        gauge.voltage_id = data['voltage_id']
+        gauge.account_status = data['account_status']
         try:
             db.session.commit()
         except IntegrityError as e:
@@ -274,13 +277,14 @@ def add_new_gauge():
     voltage_types = db.session.query(Voltage).all()
     v_t_list = [v_t.to_dict() for v_t in voltage_types]
     if request.method == "POST":
+        data = request.get_json()
         new_gauge = Gauge(
-            account_number=request.form.get('account_number'),
-            meter_id=request.form.get('meter_id'),
-            meter_factor=request.form.get('meter_factor'),
-            final_reading=request.form.get('final_reading'),
-            voltage_id=request.form.get('voltage_id'),
-            account_status=request.form.get('account_status')
+            account_number=data['account_number'],
+            meter_id=data['meter_id'],
+            meter_factor=data['meter_factor'],
+            final_reading=data['final_reading'],
+            voltage_id=data['voltage_id'],
+            account_status=data['account_status']
         )
         db.session.add(new_gauge)
 
@@ -328,10 +332,11 @@ def add_new_stg():
     techs_list = [tech.to_dict() for tech in all_techs]
 
     if request.method == "POST":
+        data = request.get_json()
         new_stg = StationGaugeTechnology(
-            station_id=request.form.get('station_id'),
-            technology_id=request.form.get('technology_id'),
-            account_number=request.form.get('account_number'),
+            station_id=data['station_id'],
+            technology_id=data['technology_id'],
+            account_number=data['account_number'],
             relation_status=True
         )
 
@@ -404,23 +409,24 @@ def add_new_bill(account_number):
         show_percent = True
     gauge_sgt_list = [r.to_dict() for r in gauge_sgts]
     if request.method == "POST":
+        data = request.get_json()
         if not gauge_sgts:
             return jsonify({"error": "هذا العداد غير مرتبط بمحطة، برجاء ربط العداد أولا"}), 400
         new_bill = GuageBill(
-            account_number=request.form.get('account_number'),
-            bill_month=request.form.get('bill_month'),
-            bill_year=request.form.get('bill_year'),
-            prev_reading=request.form.get('prev_reading'),
-            current_reading=request.form.get('current_reading'),
-            reading_factor=request.form.get('reading_factor'),
-            power_consump=request.form.get('power_consump'),
-            # consump_cost=request.form.get('consump_cost'),
-            fixed_installment=request.form.get('fixed_installment'),
-            settlements=request.form.get('settlements'),
-            stamp=request.form.get('stamp'),
-            prev_payments=request.form.get('prev_payments'),
-            rounding=request.form.get('rounding'),
-            bill_total=request.form.get('bill_total')
+            account_number=data['account_number'],
+            bill_month=data['bill_month'],
+            bill_year=data['bill_year'],
+            prev_reading=data['prev_reading'],
+            current_reading=data['current_reading'],
+            reading_factor=data['reading_factor'],
+            power_consump=data['power_consump'],
+            # consump_cost=data['consump_cost'],
+            fixed_installment=data['fixed_installment'],
+            settlements=data['settlements'],
+            stamp=data['stamp'],
+            prev_payments=data['prev_payments'],
+            rounding=data['rounding'],
+            bill_total=data['bill_total']
         )
         new_bill.voltage_id = new_bill.voltage.voltage_id
         new_bill.voltage_cost = new_bill.voltage.voltage_cost
@@ -483,14 +489,14 @@ def add_new_bill(account_number):
                         TechnologyBill.bill_month == new_bill.bill_month,
                         TechnologyBill.bill_year == new_bill.bill_year).first()
                     if current_tech_bill:
-                        current_tech_bill.technology_power_consump += new_bill.power_consump * request.form.get('percent')[i] / 100
-                        current_tech_bill.technology_bill_total += new_bill.bill_total * request.form.get('percent')[i] / 100
+                        current_tech_bill.technology_power_consump += new_bill.power_consump * data['percent'][i] / 100
+                        current_tech_bill.technology_bill_total += new_bill.bill_total * data['percent'][i] / 100
                     else:
                         tech_bill = TechnologyBill(
                             station_guage_technology_id=gauge_sgts[i].station_guage_technology_id,
-                            technology_bill_percentage=request.form.get('percent')[i],
-                            technology_power_consump=new_bill.power_consump * request.form.get('percent')[i] / 100,
-                            technology_bill_total=new_bill.bill_total * request.form.get('percent')[i] / 100
+                            technology_bill_percentage=data.get('percent')[i],
+                            technology_power_consump=new_bill.power_consump * data['percent'][i] / 100,
+                            technology_bill_total=new_bill.bill_total * data['percent'][i] / 100
                         )
                         db.session.add(tech_bill)
             db.session.commit()
@@ -515,7 +521,8 @@ def voltage_costs():
 def edit_voltage_cost(voltage_id):
     voltage = Voltage.query.get(voltage_id)
     if request.method == "POST":
-        voltage.voltage_cost = request.form.get('voltage_cost')
+        data = request.get_json()
+        voltage.voltage_cost = data['voltage_cost']
         try:
             db.session.commit()
         except IntegrityError as e:

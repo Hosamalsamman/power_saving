@@ -51,7 +51,6 @@ class Station(db.Model):
     station_type = db.Column(NVARCHAR(10), nullable=False)
     station_water_capacity = db.Column(Integer, nullable=False)
     water_source_id = db.Column(Integer, db.ForeignKey('water_source.water_source_id'), nullable=False)
-    station_status = db.Column(Boolean, nullable=False)
 
     branch = db.relationship('Branch', back_populates='stations')
     water_source = db.relationship('WaterSource', back_populates='stations')
@@ -109,7 +108,6 @@ class StationGaugeTechnology(db.Model):
     station = db.relationship('Station', back_populates='station_techs')
     technology = db.relationship('Technology', back_populates='station_techs')
     guage = db.relationship('Gauge', back_populates='station_techs')
-    bills = db.relationship('TechnologyBill', back_populates='station_tech')
 
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -140,7 +138,6 @@ class GuageBill(db.Model):
 
     guage = db.relationship('Gauge', back_populates='bills')
     voltage = db.relationship('Voltage', back_populates='bills')
-    technology_bills = db.relationship('TechnologyBill', back_populates='guage_bill')
 
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -162,8 +159,9 @@ class TechnologyBill(db.Model):
     technology_water_amount = db.Column(BigInteger)
     technology_bill_total = db.Column(Numeric(19, 4), nullable=False)
 
-    guage_bill = db.relationship('GuageBill', back_populates='technology_bills')
-    station_tech = db.relationship('StationGaugeTechnology', back_populates='bills')
+    # Relationships
+    station = db.relationship('Station', back_populates='technology_bills')
+    technology = db.relationship('Technology', back_populates='technology_bills')
 
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
