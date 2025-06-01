@@ -147,6 +147,7 @@ class GuageBill(db.Model):
 
 class TechnologyBill(db.Model):
     __tablename__ = 'technology_bill'
+    tech_bill_id = db.Column(Integer, unique=True, nullable=False)
     bill_month = db.Column(Integer, primary_key=True)
     bill_year = db.Column(Integer, primary_key=True)
     station_id = db.Column(Integer, db.ForeignKey('stations.station_id'), primary_key=True)

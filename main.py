@@ -509,6 +509,47 @@ def add_new_bill(account_number):
     return jsonify(gauge_sgt_list=gauge_sgt_list, show_percent=show_percent)
 
 
+@app.route("/tech-bills")
+def show_tech_bills():
+    all_tech_bills = db.session.query(TechnologyBill).all()
+    tech_bills_list = [t_b.to_dict() for t_b in all_tech_bills]
+    return jsonify(tech_bills_list)
+
+
+@app.route("/edit-tech-bill/<tech_bill_id>", methods=["GET", "POST"])
+def edit_tech_bill(tech_bill_id):
+    bill = TechnologyBill.query.get(tech_bill_id)
+    if request.method == "POST":
+        data = request.get_json()
+        bill.technology_liquid_chlorine_consump = data['technology_liquid_chlorine_consump']
+        bill.technology_solid_chlorine_consump = data['technology_solid_chlorine_consump']
+        bill.technology_alum_consump = data['technology_alum_consump']
+        bill.technology_water_amount = data['technology_water_amount']
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم ادخال البيانات بنجاح"
+                }
+            }
+            return jsonify(response), 200
+    return jsonify(bill.to_dict())
+
+
 # Add route to change voltage cost
 @app.route("/voltage-costs")
 def voltage_costs():
