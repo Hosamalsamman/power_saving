@@ -64,13 +64,8 @@ def stations():
 
 @app.route("/edit-station/<station_id>", methods=["GET", "POST"])
 def edit_station(station_id):
-    station = Station.query.get(station_id)
+    station = db.session.get(Station, station_id)
 
-    branches = db.session.query(Branch).all()
-    branches_list = [branch.to_dict() for branch in branches]
-
-    sources = db.session.query(WaterSource).all()
-    sources_list = [source.to_dict() for source in sources]
     if request.method == "POST":
         data = request.get_json()
         station.station_name = data['name']
@@ -82,16 +77,20 @@ def edit_station(station_id):
         try:
             db.session.commit()
         except IntegrityError as e:
+            print(e)
             db.session.rollback()
             return jsonify(
                 {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
         except DataError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
         except SQLAlchemyError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
         except Exception as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
         else:
@@ -100,7 +99,7 @@ def edit_station(station_id):
                     "success": "تم تعديل بيانات المحطة بنجاح"
                 }
             }), 200
-    return jsonify(current_station=station.to_dict(), branches=branches_list, water_sources=sources_list)
+    return jsonify({"response": {"success": "صل ع النبي"}})
 
 
 @app.route("/new-station", methods=["GET", "POST"])
@@ -124,16 +123,20 @@ def add_new_station():
         try:
             db.session.commit()
         except IntegrityError as e:
+            print(e)
             db.session.rollback()
             return jsonify(
                 {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
         except DataError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
         except SQLAlchemyError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
         except Exception as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
         else:
@@ -156,29 +159,33 @@ def technologies():
 @app.route("/edit-tech/<tech_id>", methods=["GET", "POST"])
 def edit_tech(tech_id):
     tech = Technology.query.get(tech_id)
-    current_user_permissions = [permission.to_dict() for permission in current_user.group.permissions]
+    # current_user_permissions = [permission.to_dict() for permission in current_user.group.permissions]
     if request.method == "POST":
         data = request.get_json()
         tech.technology_name = data['technology_name']
         tech.power_per_water = data['power_per_water']
-        if any(p.permession_name == "set alum and chlorine" for p in current_user.group.permissions):
-            tech.liquid_alum_per_water = data['liquid_alum_per_water']
-            tech.solid_alum_per_water = data['solid_alum_per_water']
-            tech.chlorine_per_water = data['chlorine_per_water']
+        # if any(p.permession_name == "set alum and chlorine" for p in current_user.group.permissions):
+        tech.liquid_alum_per_water = data['liquid_alum_per_water']
+        tech.solid_alum_per_water = data['solid_alum_per_water']
+        tech.chlorine_per_water = data['chlorine_per_water']
 
         try:
             db.session.commit()
         except IntegrityError as e:
+            print(e)
             db.session.rollback()
             return jsonify(
                 {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
         except DataError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
         except SQLAlchemyError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
         except Exception as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
         else:
@@ -187,37 +194,42 @@ def edit_tech(tech_id):
                     "success": "تم تعديل بيانات تقنية الترشيح بنجاح"
                 }
             }), 200
-    return jsonify(current_tech=tech.to_dict(), current_user_permissions=current_user_permissions)
+    return jsonify({"respose": "اذكر الله"})   # current_user_permissions=current_user_permissions
 
 
 @app.route("/new-tech", methods=["GET", "POST"])
 def add_new_tech():
-    current_user_permissions = [permission.to_dict() for permission in current_user.group.permissions]
+    # current_user_permissions = [permission.to_dict() for permission in current_user.group.permissions]
     if request.method == "POST":
         data = request.get_json()
+        print(data)
         new_tech = Technology(
             technology_name=data['technology_name'],
             power_per_water=data['power_per_water'],
         )
-        if any(p.permession_name == "set alum and chlorine" for p in current_user.group.permissions):
-            new_tech.liquid_alum_per_water = data['liquid_alum_per_water'] or None,
-            new_tech.solid_alum_per_water = data['solid_alum_per_water'] or None,
-            new_tech.chlorine_per_water = data['chlorine_per_water'] or None
+        # if any(p.permession_name == "set alum and chlorine" for p in current_user.group.permissions):
+        new_tech.liquid_alum_per_water = data['liquid_alum_per_water'] or None
+        new_tech.solid_alum_per_water = data['solid_alum_per_water'] or None
+        new_tech.chlorine_per_water = data['chlorine_per_water'] or None
 
         db.session.add(new_tech)
         try:
             db.session.commit()
         except IntegrityError as e:
+            print(e)
             db.session.rollback()
             return jsonify(
                 {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
         except DataError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
         except SQLAlchemyError as e:
             db.session.rollback()
+            print(e)
             return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
         except Exception as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
         else:
@@ -227,7 +239,7 @@ def add_new_tech():
                 }
             }
             return jsonify(response), 200
-    return jsonify(current_user_permissions=current_user_permissions)
+    return jsonify({"response": "user permissions will be instead of this response"})   # current_user_permissions=current_user_permissions
 
 
 @app.route("/gauges")
@@ -251,16 +263,20 @@ def edit_gauge(gauge_id):
         try:
             db.session.commit()
         except IntegrityError as e:
+            print(e)
             db.session.rollback()
             return jsonify(
                 {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
         except DataError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
         except SQLAlchemyError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
         except Exception as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
         else:
@@ -291,16 +307,20 @@ def add_new_gauge():
         try:
             db.session.commit()
         except IntegrityError as e:
+            print(e)
             db.session.rollback()
             return jsonify(
                 {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
         except DataError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
         except SQLAlchemyError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
         except Exception as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
         else:

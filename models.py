@@ -18,6 +18,7 @@ class Branch(db.Model):
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
+
 class Technology(db.Model):
     __tablename__ = 'technologies'
     technology_id = db.Column(Integer, primary_key=True)
@@ -32,6 +33,7 @@ class Technology(db.Model):
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
 
 class WaterSource(db.Model):
     __tablename__ = 'water_source'
@@ -61,8 +63,7 @@ class Station(db.Model):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
         data['branch_name'] = self.branch.branch_name if self.branch else None
         data['water_source_name'] = self.water_source.water_source_name if self.water_source else None
-        data.pop('branch_id', None)
-        data.pop('water_source_id', None)
+
         return data
 
 
@@ -169,6 +170,33 @@ class TechnologyBill(db.Model):
         data['station_name'] = self.station_tech.station.station_name if self.station_tech else None
         data['technology_name'] = self.station_tech.technology.technology_name if self.station_tech else None
         return data
+
+
+class AlumChlorineReference(db.Model):
+    __tablename__ = 'alum_chlorine_reference'
+
+    technology_id = db.Column(db.Integer, db.ForeignKey('technologies.technology_id'), primary_key=True)
+    water_source_id = db.Column(db.Integer, db.ForeignKey('water_source.water_source_id'), primary_key=True)
+    season = db.Column(db.String, primary_key=True)
+
+    chlorine_range_from = db.Column(db.Float, nullable=False)
+    chlorine_range_to = db.Column(db.Float, nullable=False)
+    solid_alum_range_from = db.Column(db.Float)
+    solid_alum_range_to = db.Column(db.Float)
+    liquid_alum_range_from = db.Column(db.Float)
+    liquid_alum_range_to = db.Column(db.Float)
+
+    # Relationships
+    technology = db.relationship('Technology', backref='alum_chlorine_references')
+    water_source = db.relationship('WaterSource', backref='alum_chlorine_references')
+
+    def to_dict(self):
+        data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        data['technology_name'] = self.technology.technology_name if self.technology else None
+        data['water_source_name'] = self.water_source.water_source_name if self.water_source else None
+        return data
+
+
 class Group(db.Model):
     __tablename__ = 'groups'
     group_id = db.Column(Integer, primary_key=True)
