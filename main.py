@@ -47,7 +47,12 @@ with app.app_context():
     db.create_all()
 
 
-# Create my own decorators
+# Create my own decorators and functions
+def get_season(month):
+    if month in range(4, 11):          # 11 is exclusive, so covers 4 to 10
+        return "summer"
+    else:
+        return "winter"
 
 
 @app.route("/")
@@ -433,7 +438,8 @@ def add_new_bill(account_number):
             stamp=data['stamp'],
             prev_payments=data['prev_payments'],
             rounding=data['rounding'],
-            bill_total=data['bill_total']
+            bill_total=data['bill_total'],
+            is_paid=data['is_paid']
         )
         new_bill.voltage_id = new_bill.voltage.voltage_id
         new_bill.voltage_cost = new_bill.voltage.voltage_cost
@@ -525,13 +531,31 @@ def show_tech_bills():
 
 @app.route("/edit-tech-bill/<tech_bill_id>", methods=["GET", "POST"])
 def edit_tech_bill(tech_bill_id):
-    bill = TechnologyBill.query.get(tech_bill_id)
+    bill = db.session.get(TechnologyBill, tech_bill_id)
+    # make old rows uneditable
+    if bill.power_per_water:
+        return jsonify({"response": "لا يمكن تعديل البيانات التاريخية للنظام"}), 400
+
     if request.method == "POST":
         data = request.get_json()
-        bill.technology_liquid_chlorine_consump = data['technology_liquid_chlorine_consump']
-        bill.technology_solid_chlorine_consump = data['technology_solid_chlorine_consump']
-        bill.technology_alum_consump = data['technology_alum_consump']
+        bill.technology_liquid_alum_consump = data['technology_liquid_chlorine_consump']
+        bill.technology_solid_alum_consump = data['technology_solid_chlorine_consump']
+        bill.technology_chlorine_consump = data['technology_alum_consump']
         bill.technology_water_amount = data['technology_water_amount']
+        bill.power_per_water = bill.technology.power_per_water
+        current_season = get_season(bill.bill_month)
+        current_water_source = bill.station.water_source_id
+        chemicals_ref = db.session.query(AlumChlorineReference).filter(AlumChlorineReference.technology_id == bill.technology_id,
+                                                                       AlumChlorineReference.season == current_season,
+                                                                       AlumChlorineReference.water_source == current_water_source).first()
+        if chemicals_ref:
+            bill.chlorine_range_from = chemicals_ref.chlorine_range_from
+            bill.chlorine_range_to = chemicals_ref.chlorine_range_to
+            bill.liquid_alum_range_from = chemicals_ref.liquid_alum_range_from
+            bill.liquid_alum_range_to = chemicals_ref.liquid_alum_range_to
+            bill.solid_alum_range_from = chemicals_ref.solid_alum_range_from
+            bill.solid_alum_range_to = chemicals_ref.solid_alum_range_to
+
         try:
             db.session.commit()
         except IntegrityError as e:
