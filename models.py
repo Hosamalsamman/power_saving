@@ -24,9 +24,6 @@ class Technology(db.Model):
     technology_id = db.Column(Integer, primary_key=True)
     technology_name = db.Column(NVARCHAR(200), unique=True, nullable=False)
     power_per_water = db.Column(Float, nullable=False)
-    liquid_alum_per_water = db.Column(Float)
-    solid_alum_per_water = db.Column(Float)
-    chlorine_per_water = db.Column(Float)
 
     station_techs = db.relationship('StationGaugeTechnology', back_populates='technology')
     technology_bills = db.relationship('TechnologyBill', back_populates='technology')
@@ -86,7 +83,6 @@ class Gauge(db.Model):
     meter_factor = db.Column(Integer, nullable=False)
     final_reading = db.Column(BigInteger, nullable=False)
     voltage_id = db.Column(Integer, db.ForeignKey('voltage.voltage_id'), nullable=False)
-    account_status = db.Column(Boolean, nullable=False)
 
     voltage = db.relationship('Voltage', back_populates='guages')
     bills = db.relationship('GuageBill', back_populates='guage')
@@ -136,6 +132,7 @@ class GuageBill(db.Model):
     prev_payments = db.Column(Numeric(19, 4), nullable=False)
     rounding = db.Column(Float, nullable=False)
     bill_total = db.Column(Numeric(19, 4), nullable=False)
+    is_paid = db.Column(Boolean, nullable=False)
 
     guage = db.relationship('Gauge', back_populates='bills')
     voltage = db.relationship('Voltage', back_populates='bills')

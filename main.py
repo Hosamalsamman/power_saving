@@ -158,16 +158,11 @@ def technologies():
 
 @app.route("/edit-tech/<tech_id>", methods=["GET", "POST"])
 def edit_tech(tech_id):
-    tech = Technology.query.get(tech_id)
-    # current_user_permissions = [permission.to_dict() for permission in current_user.group.permissions]
+    tech = db.session.get(Technology, tech_id)
     if request.method == "POST":
         data = request.get_json()
         tech.technology_name = data['technology_name']
         tech.power_per_water = data['power_per_water']
-        # if any(p.permession_name == "set alum and chlorine" for p in current_user.group.permissions):
-        tech.liquid_alum_per_water = data['liquid_alum_per_water']
-        tech.solid_alum_per_water = data['solid_alum_per_water']
-        tech.chlorine_per_water = data['chlorine_per_water']
 
         try:
             db.session.commit()
@@ -199,7 +194,6 @@ def edit_tech(tech_id):
 
 @app.route("/new-tech", methods=["GET", "POST"])
 def add_new_tech():
-    # current_user_permissions = [permission.to_dict() for permission in current_user.group.permissions]
     if request.method == "POST":
         data = request.get_json()
         print(data)
@@ -207,10 +201,6 @@ def add_new_tech():
             technology_name=data['technology_name'],
             power_per_water=data['power_per_water'],
         )
-        # if any(p.permession_name == "set alum and chlorine" for p in current_user.group.permissions):
-        new_tech.liquid_alum_per_water = data['liquid_alum_per_water'] or None
-        new_tech.solid_alum_per_water = data['solid_alum_per_water'] or None
-        new_tech.chlorine_per_water = data['chlorine_per_water'] or None
 
         db.session.add(new_tech)
         try:
@@ -251,15 +241,13 @@ def gauges():
 
 @app.route("/edit-gauge/<gauge_id>", methods=["GET", "POST"])
 def edit_gauge(gauge_id):
-    gauge = Gauge.query.get(gauge_id)
-    voltage_types = db.session.query(Voltage).all()
-    v_t_list = [v_t.to_dict() for v_t in voltage_types]
+    gauge = db.session.get(Gauge, gauge_id)
+
     if request.method == "POST":
         data = request.get_json()
         gauge.meter_id = data['meter_id']
         gauge.meter_factor = data['meter_factor']
         gauge.voltage_id = data['voltage_id']
-        gauge.account_status = data['account_status']
         try:
             db.session.commit()
         except IntegrityError as e:
@@ -285,7 +273,7 @@ def edit_gauge(gauge_id):
                     "success": "تم تعديل بيانات العداد بنجاح"
                 }
             }), 200
-    return jsonify(current_gauge=gauge.to_dict(), voltage_types=v_t_list)
+    return jsonify({"response": "سبحان الله"})
 
 
 @app.route("/new-gauge", methods=["GET", "POST"])
@@ -300,7 +288,6 @@ def add_new_gauge():
             meter_factor=data['meter_factor'],
             final_reading=data['final_reading'],
             voltage_id=data['voltage_id'],
-            account_status=data['account_status']
         )
         db.session.add(new_gauge)
 
