@@ -5,6 +5,8 @@ from flask_cors import CORS
 from models import *
 from flask_login import login_user, LoginManager, current_user, logout_user
 from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
 
 # import secrets
 #
@@ -35,8 +37,8 @@ login_manager.init_app(app)
 
 
 @login_manager.user_loader
-def load_user(user_id):
-    return db.get_or_404(User, user_id)
+def load_user(emp_code):
+    return db.get_or_404(User, emp_code)
 
 
 # Connect to Database
@@ -241,15 +243,17 @@ def add_new_tech():
 def gauges():
     all_gauges = db.session.query(Gauge).all()
     gauges_list = [gauge.to_dict() for gauge in all_gauges]
+
     return jsonify(gauges_list)
 
 
-@app.route("/edit-gauge/<gauge_id>", methods=["GET", "POST"])
-def edit_gauge(gauge_id):
-    gauge = db.session.get(Gauge, gauge_id)
+@app.route("/edit-gauge/<account_number>", methods=["GET", "POST"])
+def edit_gauge(account_number):
+    gauge = db.session.get(Gauge, account_number)
 
     if request.method == "POST":
         data = request.get_json()
+        print(data)
         gauge.meter_id = data['meter_id']
         gauge.meter_factor = data['meter_factor']
         gauge.voltage_id = data['voltage_id']
@@ -292,7 +296,7 @@ def add_new_gauge():
             meter_id=data['meter_id'],
             meter_factor=data['meter_factor'],
             final_reading=data['final_reading'],
-            voltage_id=data['voltage_id'],
+            voltage_id=data['voltage_id']
         )
         db.session.add(new_gauge)
 
@@ -322,7 +326,7 @@ def add_new_gauge():
                 }
             }
             return jsonify(response), 200
-    return jsonify(voltage_types=v_t_list)
+    return jsonify(v_t_list)
 
 
 @app.route("/stg-relations")
@@ -619,6 +623,153 @@ def edit_voltage_cost(voltage_id):
             return jsonify(response), 200
 
     return jsonify(voltage.to_dict())
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+
+    if request.method == "POST":
+        data = request.get_json()
+        user = db.session.query(User).filter(User.username == data['username']).first()
+        if user:
+            return jsonify({"response": "يوجد حساب بهذا الاسم، جرب تسجيل الدخول بدلا من إنشاء حساب جديد"}), 401
+        hash_and_salted_password = generate_password_hash(
+            data['password'],
+            method='pbkdf2:sha256',
+            salt_length=8
+        )
+        new_user = User(
+            emp_code=data['emp_code'],
+            emp_name=data['emp_name'],
+            username=data['username'],
+            userpassword=hash_and_salted_password,
+            is_active=False
+        )
+        db.session.add(new_user)
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم إنشاء الحساب بنجاح، برجاء التواصل مع الإدارة العامة لتكنولوجيا المعلومات لتفعيل حسابك"
+                }
+            }
+            return jsonify(response), 200
+    return jsonify({"response": "الحمد لله"})
+
+
+@app.route("/all-users")
+def all_users():
+    users = db.session.query(User).all()
+    users_list = [user.to_dict() for user in users]
+    return jsonify(users_list)
+
+
+@app.route("/edit-user/<emp_code>", methods=["GET", "POST"])
+def verify_user(emp_code):
+    user = db.session.query(User, emp_code)
+    groups = db.session.query(Group).all()
+    groups_list = [group.to_dict() for group in groups]
+    if request.method == "POST":
+        data = request.get_json()
+        user.emp_name = data['emp_name']
+        user.group_id = data['group_id']
+        user.is_active = data['is_active']
+        if data['reset']:
+            new_hashed_password = generate_password_hash(data['new_password'], method='pbkdf2:sha256', salt_length=8)
+            user.userpassword = new_hashed_password
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم تعديل بيانات المستخدم بنجاح"
+                }
+            }
+            return jsonify(response), 200
+
+    return jsonify(groups_list)        #   {"response": "الله أكبر"}
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+
+    if request.method == "POST":
+        data = request.get_json()
+        user = db.session.query(User).filter(User.username == data['username']).first()
+
+        if not user or not check_password_hash(user.password, data['password']):
+            return jsonify({"response": "اسم مستخدم أو كلمة مرور خاطئة"}), 401
+        else:
+            login_user(user)
+            return jsonify(current_user=current_user.to_dict()), 200
+    return jsonify({"response": "لا إله إلا الله"})
+
+
+@app.route("/change-password", methods=["GET", "POST"])
+def change_password():
+
+    if request.method == "POST":
+        data = request.get_json()
+        if check_password_hash(current_user.userpassword, data['old_password']):
+            current_user.userpassword = generate_password_hash(data['new_password'], method='pbkdf2:sha256', salt_length=8)
+            try:
+                db.session.commit()
+            except IntegrityError as e:
+                db.session.rollback()
+                return jsonify(
+                    {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+            except DataError as e:
+                db.session.rollback()
+                return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+            except SQLAlchemyError as e:
+                db.session.rollback()
+                return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+            except Exception as e:
+                db.session.rollback()
+                return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+            else:
+                response = {
+                    "response": {
+                        "success": "تم تغيير كلمة المرور بنجاح"
+                    }
+                }
+                return jsonify(response), 200
+        else:
+            return jsonify({"response": "كلمة السر الحالية خاطئة"}), 401
+    return jsonify({"response": "سبحان الله وبحمده، سبحان الله العظيم"})
+
+
+@app.route("/logout")
+def logout():
+    logout_user()
+    return jsonify({"response": "لا حول ولا قوة إلا بالله العلي العظيم"})
 
 
 if __name__ == '__main__':

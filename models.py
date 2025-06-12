@@ -1,6 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Float, ForeignKey, NVARCHAR, Numeric
+from flask_login import UserMixin
 
 
 class Base(DeclarativeBase):
@@ -79,7 +80,7 @@ class Voltage(db.Model):
 class Gauge(db.Model):
     __tablename__ = 'guages'
     account_number = db.Column(NVARCHAR(50), primary_key=True)
-    meter_id = db.Column(NVARCHAR(50), unique=True)
+    meter_id = db.Column(NVARCHAR(50), unique=True, nullable=False)
     meter_factor = db.Column(Integer, nullable=False)
     final_reading = db.Column(BigInteger, nullable=False)
     voltage_id = db.Column(Integer, db.ForeignKey('voltage.voltage_id'), nullable=False)
@@ -239,18 +240,20 @@ class GroupPermission(db.Model):
             'permession_name': self.permission.permession_name if self.permission else None
         }
 
-class User(db.Model):
+
+class User(UserMixin, db.Model):
     __tablename__ = 'users'
     emp_code = db.Column(NVARCHAR(8), primary_key=True)
     emp_name = db.Column(NVARCHAR(400), unique=True, nullable=False)
     username = db.Column(NVARCHAR(30), unique=True)
     userpassword = db.Column(NVARCHAR(30), nullable=False)
-    group_id = db.Column(Integer, db.ForeignKey('groups.group_id'), nullable=False)
+    group_id = db.Column(Integer, db.ForeignKey('groups.group_id'))
+    is_active = db.Column(Boolean, nullable=False)
 
     group = db.relationship('Group', back_populates='users')
 
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
         data['group_name'] = self.group.group_name if self.group else None
-        data.pop('group_id', None)
+        # data.pop('group_id', None)
         return data
