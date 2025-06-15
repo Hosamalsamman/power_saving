@@ -727,8 +727,11 @@ def login():
         if not user or not check_password_hash(user.password, data['password']):
             return jsonify({"response": "اسم مستخدم أو كلمة مرور خاطئة"}), 401
         else:
-            login_user(user)
-            return jsonify(current_user=current_user.to_dict()), 200
+            if user.is_active:
+                login_user(user)
+                return jsonify(current_user=current_user.to_dict()), 200
+            else:
+                return jsonify({"response": "هذا الحساب غير مفعل، برجاء مراجعة الادارة العامة لتكنولوجيا المعلومات لتفعيل حسابك"}), 401
     return jsonify({"response": "لا إله إلا الله"})
 
 
