@@ -179,7 +179,7 @@ class TechnologyBill(db.Model):
 
 class AlumChlorineReference(db.Model):
     __tablename__ = 'alum_chlorine_reference'
-
+    chemical_id = db.Column(Integer, unique=True, nullable=False)
     technology_id = db.Column(db.Integer, db.ForeignKey('technologies.technology_id'), primary_key=True)
     water_source_id = db.Column(db.Integer, db.ForeignKey('water_source.water_source_id'), primary_key=True)
     season = db.Column(db.String, primary_key=True)

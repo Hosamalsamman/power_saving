@@ -625,6 +625,95 @@ def edit_voltage_cost(voltage_id):
     return jsonify(voltage.to_dict())
 
 
+@app.route("/chemicals")
+def chemicals():
+    chemicals = db.session.query(AlumChlorineReference).all()
+    userschemicals_list = [chemical.to_dict() for chemical in chemicals]
+    return jsonify(userschemicals_list)
+
+
+@app.route("/edit-chemical/<chemical_id>", methods=["GET", "POST"])
+def edit_chemical(chemical_id):
+    chemical = db.session.query(AlumChlorineReference).filter(AlumChlorineReference.chemical_id == chemical_id).first()
+    if request.method == "POST":
+        data = request.get_json()
+        chemical.technology_id = data['technology_id']
+        chemical.water_source_id = data['water_source_id']
+        chemical.season = data['season']
+        chemical.chlorine_range_from = data['chlorine_range_from']
+        chemical.chlorine_range_to = data['chlorine_range_to']
+        chemical.solid_alum_range_from = data['solid_alum_range_from']
+        chemical.solid_alum_range_to = data['solid_alum_range_to']
+        chemical.liquid_alum_range_from = data['liquid_alum_range_from']
+        chemical.liquid_alum_range_to = data['liquid_alum_range_to']
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم تعديل القيم بنجاح"
+                }
+            }
+            return jsonify(response), 200
+
+    return jsonify({"response": "اللهم صل على سيدنا محمد"})
+
+
+@app.route("/new-chemical", methods=["GET", "POST"])
+def new_chemical():
+    if request.method == "POST":
+        data = request.get_json()
+        new_chemical_ref = AlumChlorineReference(
+            technology_id=data['technology_id'],
+            water_source_id=data['water_source_id'],
+            season=data['season'],
+            chlorine_range_from=data['chlorine_range_from'],
+            chlorine_range_to=data['chlorine_range_to'],
+            solid_alum_range_from=data['solid_alum_range_from'],
+            solid_alum_range_to=data['solid_alum_range_to'],
+            liquid_alum_range_from=data['liquid_alum_range_from'],
+            liquid_alum_range_to=data['liquid_alum_range_to']
+        )
+        db.session.add(new_chemical_ref)
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم إدخال القيم المرجعية بنجاح"
+                }
+            }
+            return jsonify(response), 200
+    return jsonify({"response": "سبحان الله وبحمده، سبحان الله العظيم"})
+
+
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
 
