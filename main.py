@@ -333,6 +333,7 @@ def add_new_gauge():
 def stg_relations():
     all_stgs = db.session.query(StationGaugeTechnology).all()
     stgs_list = [stg.to_dict() for stg in all_stgs]
+
     return jsonify(stgs_list)
 
 
@@ -349,6 +350,7 @@ def add_new_stg():
 
     if request.method == "POST":
         data = request.get_json()
+        print(data)
         new_stg = StationGaugeTechnology(
             station_id=data['station_id'],
             technology_id=data['technology_id'],
@@ -360,6 +362,7 @@ def add_new_stg():
         try:
             db.session.commit()
         except IntegrityError as e:
+            print(e)
             db.session.rollback()
             return jsonify(
                 {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
@@ -383,14 +386,10 @@ def add_new_stg():
     return jsonify(stations=stations_list, gauges=gauges_list, techs=techs_list)
 
 
-@app.route("/cancel-relation/<relation_id>")
+@app.route("/edit-relation/<relation_id>", methods=["GET", "POST"])
 def cancel_relation(relation_id):
-    current_relation = StationGaugeTechnology.query.get(relation_id)
-    if not current_relation.bills:
-        db.session.delete(current_relation)
-    else:
-        current_relation.relation_status = False
-
+    current_relation = db.session.query(StationGaugeTechnology).filter(StationGaugeTechnology.station_guage_technology_id == relation_id).first()
+    current_relation.relation_status = not current_relation.relation_status
     try:
         db.session.commit()
     except IntegrityError as e:

@@ -97,7 +97,7 @@ class Gauge(db.Model):
 
 class StationGaugeTechnology(db.Model):
     __tablename__ = 'station_guage_technology'
-    station_guage_technology_id = db.Column(Integer, unique=True, nullable=False)
+    station_guage_technology_id = db.Column(db.Integer, unique=True, nullable=False, autoincrement=True)
     station_id = db.Column(Integer, db.ForeignKey('stations.station_id'), primary_key=True)
     technology_id = db.Column(Integer, db.ForeignKey('technologies.technology_id'), primary_key=True)
     account_number = db.Column(NVARCHAR(50), db.ForeignKey('guages.account_number'), primary_key=True)
@@ -107,11 +107,22 @@ class StationGaugeTechnology(db.Model):
     technology = db.relationship('Technology', back_populates='station_techs')
     guage = db.relationship('Gauge', back_populates='station_techs')
 
+    # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if not self.station_guage_technology_id:
+            # Get next available ID
+            max_id = db.session.query(db.func.max(StationGaugeTechnology.station_guage_technology_id)).scalar()
+            self.station_guage_technology_id = (max_id or 0) + 1
+
+
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
         data['station_name'] = self.station.station_name if self.station else None
         data['technology_name'] = self.technology.technology_name if self.technology else None
         data['account_number'] = self.guage.account_number if self.guage else None
+        data['branch_id'] = self.station.branch.branch_id if self.station else None
+        data['branch_name'] = self.station.branch.branch_name if self.station else None
         return data
 
 class GuageBill(db.Model):
