@@ -225,6 +225,7 @@ class Group(db.Model):
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
+
 class Permission(db.Model):
     __tablename__ = 'premessions'
     permession_id = db.Column(Integer, primary_key=True)

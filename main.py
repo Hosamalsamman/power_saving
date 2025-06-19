@@ -408,7 +408,7 @@ def cancel_relation(relation_id):
     else:
         response = {
             "response": {
-                "success": "تم إلغاء ربط البيانات بنجاح"
+                "success": "تم تعديل البيانات بنجاح"
             }
         }
         return jsonify(response), 200
@@ -861,6 +861,221 @@ def change_password():
 def logout():
     logout_user()
     return jsonify({"response": "لا حول ولا قوة إلا بالله العلي العظيم"})
+
+
+@app.route("/groups")
+def groups():
+    groups = db.session.query(Group).all()
+    groups_list = [group.to_dict() for group in groups]
+    return jsonify(groups_list)
+
+
+@app.route("/edit-group/<group_id>", methods=["GET", "POST"])
+def edit_group(group_id):
+    group = db.session.get(Group, group_id)
+    if request.method == "POST":
+        data = request.get_json()
+        group.group_name = data['group_name']
+        group.group_notification = data['group_notification']
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم تعديل بيانات المجموعة بنجاح"
+                }
+            }
+            return jsonify(response), 200
+    return jsonify({"response": "ربنا آتنا في الدنيا حسنة وفي الآخرة حسنة وقنا عذاب النار"})
+
+
+@app.route("/new-group", methods=["GET", "POST"])
+def add_new_group():
+    if request.method == "POST":
+        data = request.get_json()
+        new_group = Group(
+            group_name=data['group_name'],
+            group_notification=data['group_notification']
+        )
+        db.session.add(new_group)
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم إضافة المجموعة بنجاح"
+                }
+            }
+            return jsonify(response), 200
+    return jsonify({"response": "اللهم اعنا على ذكرك وشكرك وحسن عبادتك"})
+
+
+@app.route("/permissions")
+def all_permissions():
+    permissions = db.session.query(Permission).all()
+    permissions_list = [permission.to_dict() for permission in permissions]
+    return jsonify(permissions_list)
+
+
+@app.route("/new-permission", methods=["GET", "POST"])
+def add_new_permission():
+    if request.method == "POST":
+        data = request.get_json()
+        new_permission = Permission(
+            permession_name=data['permession_name']
+        )
+        db.session.add(new_permission)
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم إضافة الصلاحية بنجاح"
+                }
+            }
+            return jsonify(response), 200
+    return jsonify({"response": "سبحان الله"})
+
+
+@app.route("/delete-permission/<permission_id>", methods=["GET", "POST"])
+def delete_permission(permission_id):
+    permission = db.session.get(Permission, permission_id)
+    db.session.delete(permission)
+    try:
+        db.session.commit()
+    except IntegrityError as e:
+        db.session.rollback()
+        return jsonify(
+            {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+    except DataError as e:
+        db.session.rollback()
+        return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+    else:
+        response = {
+            "response": {
+                "success": "تم حذف الصلاحية من قاعدة البيانات بنجاح"
+            }
+        }
+        return jsonify(response), 200
+
+
+@app.route("/group-permissions")
+def all_group_permissions():
+    group_permissions = db.session.query(Permission).all()
+    group_permissions_list = [g_p.to_dict() for g_p in group_permissions]
+    return jsonify(group_permissions_list)
+
+
+@app.route("/new-group-permission", methods=["GET", "POST"])
+def new_group_permission():
+    groups = db.session.query(Group).all()
+    groups_list = [group.to_dict() for group in groups]
+    permissions = db.session.query(Permission).all()
+    permissions_list = [permission.to_dict() for permission in permissions]
+    if request.method == "POST":
+        data = request.get_json()
+        new_g_p = GroupPermission(
+            group_id=data['group_id'],
+            permession_id=data['permession_id']
+        )
+        db.session.add(new_g_p)
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم إضافة الصلاحية للمجموعة بنجاح"
+                }
+            }
+            return jsonify(response), 200
+
+    return jsonify(groups=groups_list, permissions=permissions_list)
+
+
+@app.route("/delete-group-permission/<group_id>/<permission_id>", methods=["GET", "post"])
+def delete_group_permission(group_id, permission_id):
+    g_p = db.session.get(GroupPermission, (group_id, permission_id))
+    db.session.delete(g_p)
+    try:
+        db.session.commit()
+    except IntegrityError as e:
+        db.session.rollback()
+        return jsonify(
+            {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+    except DataError as e:
+        db.session.rollback()
+        return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+    else:
+        response = {
+            "response": {
+                "success": "تم حذف الصلاحية من المجموعة بنجاح"
+            }
+        }
+        return jsonify(response), 200
 
 
 if __name__ == '__main__':
