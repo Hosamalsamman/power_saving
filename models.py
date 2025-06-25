@@ -1,6 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase, relationship
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Float, ForeignKey, NVARCHAR, Numeric
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Float, ForeignKey, NVARCHAR, Numeric, DECIMAL
 from flask_login import UserMixin
 
 
@@ -69,7 +69,8 @@ class Voltage(db.Model):
     __tablename__ = 'voltage'
     voltage_id = db.Column(Integer, primary_key=True)
     voltage_type = db.Column(NVARCHAR(50), nullable=False)
-    voltage_cost = db.Column(Numeric(19, 4), nullable=False)
+    voltage_cost = db.Column(NVARCHAR(50), nullable=False)
+    fixed_fee = db.Column(Integer, nullable=False)
 
     guages = db.relationship('Gauge', back_populates='voltage')
     bills = db.relationship('GuageBill', back_populates='voltage')
@@ -135,8 +136,8 @@ class GuageBill(db.Model):
     current_reading = db.Column(BigInteger, nullable=False)
     reading_factor = db.Column(Integer, nullable=False)
     power_consump = db.Column(BigInteger, nullable=False)
-    voltage_id = db.Column(Integer, db.ForeignKey('voltage.voltage_id'), nullable=True)
-    voltage_cost = db.Column(Numeric(19, 4), nullable=True)
+    voltage_id = db.Column(Integer, db.ForeignKey('voltage.voltage_id'), nullable=False)
+    voltage_cost = db.Column(NVARCHAR(50), nullable=False)
     # consump_cost = db.Column(Numeric(19, 4), nullable=False)
     fixed_installment = db.Column(Numeric(19, 4), nullable=False)
     settlements = db.Column(Numeric(19, 4), nullable=False)
@@ -153,6 +154,14 @@ class GuageBill(db.Model):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
         data['voltage_type'] = self.voltage.voltage_type if self.voltage else None
         return data
+
+    # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if not self.guage_bill_id:
+            # Get next available ID
+            max_id = db.session.query(db.func.max(GuageBill.guage_bill_id)).scalar()
+            self.guage_bill_id = (max_id or 0) + 1
 
 
 class TechnologyBill(db.Model):
@@ -186,6 +195,14 @@ class TechnologyBill(db.Model):
         data['station_name'] = self.station_tech.station.station_name if self.station_tech else None
         data['technology_name'] = self.station_tech.technology.technology_name if self.station_tech else None
         return data
+
+    # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if not self.tech_bill_id:
+            # Get next available ID
+            max_id = db.session.query(db.func.max(TechnologyBill.tech_bill_id)).scalar()
+            self.tech_bill_id = (max_id or 0) + 1
 
 
 class AlumChlorineReference(db.Model):

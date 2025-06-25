@@ -1,5 +1,8 @@
 import os
+from decimal import Decimal
+
 from flask import Flask, jsonify, render_template, request
+from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, DataError
 from flask_cors import CORS
 from models import *
@@ -51,7 +54,7 @@ with app.app_context():
 
 # Create my own decorators and functions
 def get_season(month):
-    if month in range(4, 11):          # 11 is exclusive, so covers 4 to 10
+    if month in range(4, 11):  # 11 is exclusive, so covers 4 to 10
         return "summer"
     else:
         return "winter"
@@ -196,7 +199,7 @@ def edit_tech(tech_id):
                     "success": "تم تعديل بيانات تقنية الترشيح بنجاح"
                 }
             }), 200
-    return jsonify({"respose": "اذكر الله"})   # current_user_permissions=current_user_permissions
+    return jsonify({"respose": "اذكر الله"})  # current_user_permissions=current_user_permissions
 
 
 @app.route("/new-tech", methods=["GET", "POST"])
@@ -236,7 +239,8 @@ def add_new_tech():
                 }
             }
             return jsonify(response), 200
-    return jsonify({"response": "user permissions will be instead of this response"})   # current_user_permissions=current_user_permissions
+    return jsonify({
+        "response": "user permissions will be instead of this response"})  # current_user_permissions=current_user_permissions
 
 
 @app.route("/gauges")
@@ -388,7 +392,8 @@ def add_new_stg():
 
 @app.route("/edit-relation/<relation_id>", methods=["GET", "POST"])
 def cancel_relation(relation_id):
-    current_relation = db.session.query(StationGaugeTechnology).filter(StationGaugeTechnology.station_guage_technology_id == relation_id).first()
+    current_relation = db.session.query(StationGaugeTechnology).filter(
+        StationGaugeTechnology.station_guage_technology_id == relation_id).first()
     current_relation.relation_status = not current_relation.relation_status
     try:
         db.session.commit()
@@ -418,23 +423,30 @@ def cancel_relation(relation_id):
 def add_new_bill(account_number):
     show_percent = False
     gauge_sgts = db.session.query(StationGaugeTechnology).filter(
-        (StationGaugeTechnology.account_number == account_number) & (
-                    StationGaugeTechnology.relation_status is True)).all()
+        and_(
+            StationGaugeTechnology.account_number == account_number,
+            StationGaugeTechnology.relation_status.is_(True)
+        )
+    ).all()
     if len(gauge_sgts) > 1:
         show_percent = True
     gauge_sgt_list = [r.to_dict() for r in gauge_sgts]
     if request.method == "POST":
         data = request.get_json()
+        print(data)
         if not gauge_sgts:
-            return jsonify({"error": "هذا العداد غير مرتبط بمحطة، برجاء ربط العداد أولا"}), 400
+            return jsonify({"error": "هذا العداد غير مرتبط بمحطة، برجاء ربط العداد أولا"}), 409
+        gauge = db.session.get(Gauge, account_number)
         new_bill = GuageBill(
-            account_number=data['account_number'],
+            account_number=account_number,
             bill_month=data['bill_month'],
             bill_year=data['bill_year'],
             prev_reading=data['prev_reading'],
             current_reading=data['current_reading'],
             reading_factor=data['reading_factor'],
             power_consump=data['power_consump'],
+            voltage_id=gauge.voltage_id,
+            voltage_cost=gauge.voltage.voltage_cost,
             # consump_cost=data['consump_cost'],
             fixed_installment=data['fixed_installment'],
             settlements=data['settlements'],
@@ -444,23 +456,55 @@ def add_new_bill(account_number):
             bill_total=data['bill_total'],
             is_paid=data['is_paid']
         )
-        new_bill.voltage_id = new_bill.voltage.voltage_id
-        new_bill.voltage_cost = new_bill.voltage.voltage_cost
         # check prev-reading
-        if new_bill.prev_reading != new_bill.guage.final_reading:
-            return jsonify({"error": "القراءة السابقة غير مطابقة لآخر قراءة مسجلة لدينا"}), 400
+        if new_bill.prev_reading != gauge.final_reading:
+            return jsonify({"error": "القراءة السابقة غير مطابقة لآخر قراءة مسجلة لدينا"}), 410
         # check reading factor
-        if new_bill.reading_factor != new_bill.guage.reading_factor:
-            return jsonify({"error": "معامل العداد غير مطابق لبيانات العداد المسجلة لدينا"}), 400
+        if new_bill.reading_factor != gauge.meter_factor:
+            return jsonify({"error": "معامل العداد غير مطابق لبيانات العداد المسجلة لدينا"}), 411
         # check bill total
-        calculated_bill_total = (new_bill.current_reading - new_bill.prev_reading) * new_bill.reading_factor * new_bill.voltage_cost + new_bill.fixed_installment + new_bill.settlements + new_bill.stamp - new_bill.prev_payments + new_bill.rounding
+        print(f"{gauge.voltage.voltage_cost} type{type(gauge.voltage.voltage_cost)}")
+        calculated_bill_total = (
+                (Decimal(new_bill.current_reading) - Decimal(new_bill.prev_reading)) *
+                Decimal(new_bill.reading_factor) *
+                Decimal(str(new_bill.voltage_cost)) +
+                Decimal(str(gauge.voltage.fixed_fee)) +
+                Decimal(new_bill.fixed_installment) +
+                Decimal(new_bill.settlements) +
+                Decimal(str(new_bill.stamp)) -
+                Decimal(new_bill.prev_payments) +
+                Decimal(str(new_bill.rounding))
+        )
+        # Convert all values to Decimal
+        current_reading = Decimal(new_bill.current_reading)
+        prev_reading = Decimal(new_bill.prev_reading)
+        reading_factor = Decimal(new_bill.reading_factor)
+        voltage_cost = Decimal(new_bill.voltage_cost)
+        fixed_installment = Decimal(new_bill.fixed_installment)
+        settlements = Decimal(new_bill.settlements)
+        stamp = Decimal(str(new_bill.stamp))
+        prev_payments = Decimal(new_bill.prev_payments)
+        rounding = Decimal(str(new_bill.rounding))
 
+        # Print all values
+        print(f"power consump       : {(current_reading - prev_reading) * reading_factor}")
+        print(f"Current Reading     : {current_reading}")
+        print(f"Previous Reading    : {prev_reading}")
+        print(f"Reading Factor      : {reading_factor}")
+        print(f"Voltage Cost        : {voltage_cost}")
+        print(f"Fixed Installment   : {fixed_installment}")
+        print(f"Settlements         : {settlements}")
+        print(f"Stamp               : {stamp}")
+        print(f"Previous Payments   : {prev_payments}")
+        print(f"Rounding            : {rounding}")
+        print(calculated_bill_total)
         if int(calculated_bill_total) != int(new_bill.bill_total):
-            return jsonify({"error": "إجمالي الفاتورة غير مطابق لمجموع البنود المدخلة"})
+            return jsonify({"error": "إجمالي الفاتورة غير مطابق لمجموع البنود المدخلة، برجاء مراجعة بنود الفاتورة وتعريفة الجهد لهذا العداد"}), 412
         db.session.add(new_bill)
         try:
             db.session.commit()
         except IntegrityError as e:
+            print(e)
             db.session.rollback()
             return jsonify(
                 {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
@@ -468,6 +512,7 @@ def add_new_bill(account_number):
             db.session.rollback()
             return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
         except SQLAlchemyError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
         except Exception as e:
@@ -478,9 +523,13 @@ def add_new_bill(account_number):
             db.session.commit()
             #  search station gauge technology relation then insert in technology bill the corresponding data
             # one to one relations or many to one relations
-            if gauge_sgts.length == 1:
+            if len(gauge_sgts) == 1:
                 # check if a single or multi gauges are providing for same tech
-                current_tech_bill = db.session.query(TechnologyBill).filter(TechnologyBill.station_id == gauge_sgts[0].station_id, TechnologyBill.technology_id == gauge_sgts[0].technology_id, TechnologyBill.bill_month == new_bill.bill_month, TechnologyBill.bill_year == new_bill.bill_year).first()
+                current_tech_bill = db.session.query(TechnologyBill).filter(
+                    TechnologyBill.station_id == gauge_sgts[0].station_id,
+                    TechnologyBill.technology_id == gauge_sgts[0].technology_id,
+                    TechnologyBill.bill_month == new_bill.bill_month,
+                    TechnologyBill.bill_year == new_bill.bill_year).first()
                 if current_tech_bill:
                     current_tech_bill.technology_power_consump += new_bill.power_consump
                     current_tech_bill.technology_bill_total += new_bill.bill_total
@@ -509,7 +558,10 @@ def add_new_bill(account_number):
                         current_tech_bill.technology_bill_total += new_bill.bill_total * data['percent'][i] / 100
                     else:
                         tech_bill = TechnologyBill(
-                            station_guage_technology_id=gauge_sgts[i].station_guage_technology_id,
+                            station_id=gauge_sgts[i].station_id,
+                            technology_id=gauge_sgts[i].technology_id,
+                            bill_month=new_bill.bill_month,
+                            bill_year=new_bill.bill_year,
                             technology_bill_percentage=data.get('percent')[i],
                             technology_power_consump=new_bill.power_consump * data['percent'][i] / 100,
                             technology_bill_total=new_bill.bill_total * data['percent'][i] / 100
@@ -548,9 +600,10 @@ def edit_tech_bill(tech_bill_id):
         bill.power_per_water = bill.technology.power_per_water
         current_season = get_season(bill.bill_month)
         current_water_source = bill.station.water_source_id
-        chemicals_ref = db.session.query(AlumChlorineReference).filter(AlumChlorineReference.technology_id == bill.technology_id,
-                                                                       AlumChlorineReference.season == current_season,
-                                                                       AlumChlorineReference.water_source == current_water_source).first()
+        chemicals_ref = db.session.query(AlumChlorineReference).filter(
+            AlumChlorineReference.technology_id == bill.technology_id,
+            AlumChlorineReference.season == current_season,
+            AlumChlorineReference.water_source == current_water_source).first()
         if chemicals_ref:
             bill.chlorine_range_from = chemicals_ref.chlorine_range_from
             bill.chlorine_range_to = chemicals_ref.chlorine_range_to
@@ -712,10 +765,8 @@ def new_chemical():
     return jsonify({"response": "سبحان الله وبحمده، سبحان الله العظيم"})
 
 
-
 @app.route("/register", methods=["GET", "POST"])
 def register():
-
     if request.method == "POST":
         data = request.get_json()
         user = db.session.query(User).filter(User.username == data['username']).first()
@@ -802,12 +853,11 @@ def verify_user(emp_code):
             }
             return jsonify(response), 200
 
-    return jsonify(groups_list)        #   {"response": "الله أكبر"}
+    return jsonify(groups_list)  #   {"response": "الله أكبر"}
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-
     if request.method == "POST":
         data = request.get_json()
         user = db.session.query(User).filter(User.username == data['username']).first()
@@ -819,17 +869,18 @@ def login():
                 login_user(user)
                 return jsonify(current_user=current_user.to_dict()), 200
             else:
-                return jsonify({"response": "هذا الحساب غير مفعل، برجاء مراجعة الادارة العامة لتكنولوجيا المعلومات لتفعيل حسابك"}), 401
+                return jsonify({
+                    "response": "هذا الحساب غير مفعل، برجاء مراجعة الادارة العامة لتكنولوجيا المعلومات لتفعيل حسابك"}), 401
     return jsonify({"response": "لا إله إلا الله"})
 
 
 @app.route("/change-password", methods=["GET", "POST"])
 def change_password():
-
     if request.method == "POST":
         data = request.get_json()
         if check_password_hash(current_user.userpassword, data['old_password']):
-            current_user.userpassword = generate_password_hash(data['new_password'], method='pbkdf2:sha256', salt_length=8)
+            current_user.userpassword = generate_password_hash(data['new_password'], method='pbkdf2:sha256',
+                                                               salt_length=8)
             try:
                 db.session.commit()
             except IntegrityError as e:
