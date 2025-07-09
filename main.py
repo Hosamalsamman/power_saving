@@ -2,7 +2,7 @@ import os
 from decimal import Decimal
 
 from flask import Flask, jsonify, render_template, request
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, DataError
 from flask_cors import CORS
 from models import *
@@ -10,6 +10,8 @@ from flask_login import login_user, LoginManager, current_user, logout_user
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
+from datetime import datetime
+import pandas as pd
 
 # import secrets
 #
@@ -62,7 +64,54 @@ def get_season(month):
 
 @app.route("/")
 def home():
-    return "this is power saving website"
+    current_year = datetime.now().year
+    current_year_tech_bills = db.session.query(TechnologyBill).filter(
+        TechnologyBill.bill_year == current_year
+    ).all()
+    if current_year_tech_bills:
+        bills_list = [row.to_dict() for row in current_year_tech_bills]
+        df_bills = pd.DataFrame(bills_list)
+        df_bills.fillna(0, inplace=True)
+        df_bills.infer_objects(copy=False)
+        # Show all columns
+        pd.set_option('display.max_columns', None)
+        df_bills.technology_bill_total = pd.to_numeric(df_bills.technology_bill_total)
+        totals = {
+            "power": float(df_bills['technology_power_consump'].sum()),
+            "water": float(df_bills['technology_water_amount'].sum()),
+            "money": float(df_bills['technology_bill_total'].sum()),
+            "chlorine": float(df_bills['technology_chlorine_consump'].sum()),
+            "solid_alum": float(df_bills['technology_solid_alum_consump'].sum()),
+            "liquid_alum": float(df_bills['technology_liquid_alum_consump'].sum())
+        }
+
+        current_month = datetime.now().month
+        current_month_bills = db.session.query(TechnologyBill).filter(
+            TechnologyBill.bill_year == current_month).all()
+        over_power_consump = []
+        over_chlorine_consump = []
+        over_solid_alum_consump = []
+        over_liquid_alum_consump = []
+        for bill in current_month_bills:
+            if bill.power_per_water:
+                if bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water:
+                    over_power_consump.append(bill.to_dict())
+                if bill.technology_chlorine_consump / bill.technology_water_amount > bill.chlorine_range_to:
+                    over_chlorine_consump.append(bill.to_dict())
+                if bill.technology_solid_alum_consump / bill.technology_water_amount > bill.solid_alum_range_to:
+                    over_solid_alum_consump.append(bill.to_dict())
+                if bill.technology_liquid_alum_consump / bill.technology_water_amount > bill.liquid_alum_range_to:
+                    over_liquid_alum_consump.append(bill.to_dict())
+
+        return jsonify(
+            totals=totals,
+            over_power_consump=over_power_consump,
+            over_chlorine_consump=over_chlorine_consump,
+            over_solid_alum_consump=over_solid_alum_consump,
+            over_liquid_alum_consump=over_liquid_alum_consump
+        )
+
+    return jsonify({"message": "برجاء تسجيل الفواتير لمتابعة الاستهلاكات السنوية"})
 
 
 @app.route("/stations")
@@ -428,11 +477,13 @@ def add_new_bill(account_number):
             StationGaugeTechnology.relation_status.is_(True)
         )
     ).all()
-    if not gauge_sgts:
-        return jsonify({"error": "هذا العداد غير مرتبط بمحطة، برجاء ربط العداد أولا"}), 409
+
     if len(gauge_sgts) > 1:
         show_percent = True
     gauge_sgt_list = [r.to_dict() for r in gauge_sgts]
+    if not gauge_sgts:
+        return jsonify(gauge_sgt_list=gauge_sgt_list,
+                       error={"error": "هذا العداد غير مرتبط بمحطة، برجاء ربط العداد أولا"}), 409
     if request.method == "POST":
         data = request.get_json()
         print(data)
@@ -474,41 +525,42 @@ def add_new_bill(account_number):
             reading_diff += rollover
 
         calculated_bill_total = (
-                (Decimal(reading_diff)) *
-                Decimal(new_bill.reading_factor) *
+                (Decimal(str(reading_diff))) *
+                Decimal(str(new_bill.reading_factor)) *
                 Decimal(str(new_bill.voltage_cost)) +
                 Decimal(str(gauge.voltage.fixed_fee)) +
-                Decimal(new_bill.fixed_installment) +
-                Decimal(new_bill.settlements) +
+                Decimal(str(new_bill.fixed_installment)) +
+                Decimal(str(new_bill.settlements)) +
                 Decimal(str(new_bill.stamp)) -
-                Decimal(new_bill.prev_payments) +
+                Decimal(str(new_bill.prev_payments)) +
                 Decimal(str(new_bill.rounding))
         )
-        # Convert all values to Decimal
-        current_reading = Decimal(new_bill.current_reading)
-        prev_reading = Decimal(new_bill.prev_reading)
-        reading_factor = Decimal(new_bill.reading_factor)
-        voltage_cost = Decimal(new_bill.voltage_cost)
-        fixed_installment = Decimal(new_bill.fixed_installment)
-        settlements = Decimal(new_bill.settlements)
-        stamp = Decimal(str(new_bill.stamp))
-        prev_payments = Decimal(new_bill.prev_payments)
-        rounding = Decimal(str(new_bill.rounding))
+        # # Convert all values to Decimal
+        # current_reading = Decimal(new_bill.current_reading)
+        # prev_reading = Decimal(new_bill.prev_reading)
+        # reading_factor = Decimal(new_bill.reading_factor)
+        # voltage_cost = Decimal(new_bill.voltage_cost)
+        # fixed_installment = Decimal(new_bill.fixed_installment)
+        # settlements = Decimal(new_bill.settlements)
+        # stamp = Decimal(str(new_bill.stamp))
+        # prev_payments = Decimal(new_bill.prev_payments)
+        # rounding = Decimal(str(new_bill.rounding))
 
-        # Print all values
-        print(f"power consump       : {(current_reading - prev_reading) * reading_factor}")
-        print(f"Current Reading     : {current_reading}")
-        print(f"Previous Reading    : {prev_reading}")
-        print(f"Reading Factor      : {reading_factor}")
-        print(f"Voltage Cost        : {voltage_cost}")
-        print(f"Fixed Installment   : {fixed_installment}")
-        print(f"Settlements         : {settlements}")
-        print(f"Stamp               : {stamp}")
-        print(f"Previous Payments   : {prev_payments}")
-        print(f"Rounding            : {rounding}")
-        print(calculated_bill_total)
+        # # Print all values
+        # print(f"power consump       : {reading_diff * reading_factor}")
+        # print(f"Current Reading     : {current_reading}")
+        # print(f"Previous Reading    : {prev_reading}")
+        # print(f"Reading Factor      : {reading_factor}")
+        # print(f"Voltage Cost        : {voltage_cost}")
+        # print(f"Fixed Installment   : {fixed_installment}")
+        # print(f"Settlements         : {settlements}")
+        # print(f"Stamp               : {stamp}")
+        # print(f"Previous Payments   : {prev_payments}")
+        # print(f"Rounding            : {rounding}")
+        # print(calculated_bill_total)
         if int(calculated_bill_total) - int(new_bill.bill_total) not in range(-1, 2):
-            return jsonify({"error": "إجمالي الفاتورة غير مطابق لمجموع البنود المدخلة، برجاء مراجعة بنود الفاتورة وتعريفة الجهد لهذا العداد"}), 412
+            return jsonify({
+                "error": "إجمالي الفاتورة غير مطابق لمجموع البنود المدخلة، برجاء مراجعة بنود الفاتورة وتعريفة الجهد لهذا العداد"}), 412
         db.session.add(new_bill)
         try:
             db.session.commit()
@@ -563,8 +615,9 @@ def add_new_bill(account_number):
                         TechnologyBill.bill_month == new_bill.bill_month,
                         TechnologyBill.bill_year == new_bill.bill_year).first()
                     if current_tech_bill:
-                        current_tech_bill.technology_power_consump += new_bill.power_consump * data['percent'][i] / 100
-                        current_tech_bill.technology_bill_total += new_bill.bill_total * data['percent'][i] / 100
+                        current_tech_bill.technology_power_consump += (
+                                    new_bill.power_consump * data['percent'][i] / 100)
+                        current_tech_bill.technology_bill_total += (new_bill.bill_total * data['percent'][i] / 100)
                     else:
                         tech_bill = TechnologyBill(
                             station_id=gauge_sgts[i].station_id,
@@ -587,24 +640,39 @@ def add_new_bill(account_number):
 
 
 @app.route("/tech-bills")
-def show_tech_bills():
-    all_tech_bills = db.session.query(TechnologyBill).all()
+def show_null_tech_bills():
+    # Comprehensive check for various "empty" values
+    all_tech_bills = db.session.query(TechnologyBill).filter(
+        or_(
+            TechnologyBill.technology_water_amount.is_(None),  # NULL
+            TechnologyBill.technology_water_amount == '',  # Empty string
+            TechnologyBill.technology_water_amount == 'NULL',  # String "NULL"
+            TechnologyBill.technology_water_amount == 'null',  # String "null"
+            TechnologyBill.technology_water_amount == '0',  # String "0"
+            TechnologyBill.technology_water_amount == 0  # Integer 0
+        )
+    ).all()
     tech_bills_list = [t_b.to_dict() for t_b in all_tech_bills]
+    print(tech_bills_list)
     return jsonify(tech_bills_list)
 
 
 @app.route("/edit-tech-bill/<tech_bill_id>", methods=["GET", "POST"])
 def edit_tech_bill(tech_bill_id):
-    bill = db.session.get(TechnologyBill, tech_bill_id)
+    bill = db.session.query(TechnologyBill).filter(TechnologyBill.tech_bill_id == tech_bill_id).first()
     # make old rows uneditable
     if bill.power_per_water:
         return jsonify({"response": "لا يمكن تعديل البيانات التاريخية للنظام"}), 400
 
     if request.method == "POST":
         data = request.get_json()
-        bill.technology_liquid_alum_consump = data['technology_liquid_chlorine_consump']
-        bill.technology_solid_alum_consump = data['technology_solid_chlorine_consump']
-        bill.technology_chlorine_consump = data['technology_alum_consump']
+        if data['technology_water_amount'] == 0:
+            return jsonify({"error": "يجب أن تكون كمية المياه المنتجة اكبر من صفر"})
+        if data['technology_chlorine_consump'] == 0:
+            return jsonify({"error": "يجب أن تكون كمية الكلور المستهلكة اكبر من صفر"})
+        bill.technology_liquid_alum_consump = data['technology_liquid_alum_consump']
+        bill.technology_solid_alum_consump = data['technology_solid_alum_consump']
+        bill.technology_chlorine_consump = data['technology_chlorine_consump']
         bill.technology_water_amount = data['technology_water_amount']
         bill.power_per_water = bill.technology.power_per_water
         current_season = get_season(bill.bill_month)
@@ -612,7 +680,7 @@ def edit_tech_bill(tech_bill_id):
         chemicals_ref = db.session.query(AlumChlorineReference).filter(
             AlumChlorineReference.technology_id == bill.technology_id,
             AlumChlorineReference.season == current_season,
-            AlumChlorineReference.water_source == current_water_source).first()
+            AlumChlorineReference.water_source_id == current_water_source).first()
         if chemicals_ref:
             bill.chlorine_range_from = chemicals_ref.chlorine_range_from
             bill.chlorine_range_to = chemicals_ref.chlorine_range_to
@@ -649,7 +717,7 @@ def edit_tech_bill(tech_bill_id):
 # Add route to change voltage cost
 @app.route("/voltage-costs")
 def voltage_costs():
-    all_costs = db.session.query.get(Voltage).all()
+    all_costs = db.session.query(Voltage).all()
     costs_list = [v_c.to_dict() for v_c in all_costs]
     return jsonify(costs_list)
 
@@ -659,7 +727,9 @@ def edit_voltage_cost(voltage_id):
     voltage = Voltage.query.get(voltage_id)
     if request.method == "POST":
         data = request.get_json()
+        print(data)
         voltage.voltage_cost = data['voltage_cost']
+        voltage.fixed_fee = data['fixed_fee']
         try:
             db.session.commit()
         except IntegrityError as e:
@@ -707,6 +777,8 @@ def edit_chemical(chemical_id):
         chemical.solid_alum_range_to = data['solid_alum_range_to']
         chemical.liquid_alum_range_from = data['liquid_alum_range_from']
         chemical.liquid_alum_range_to = data['liquid_alum_range_to']
+        if chemical.chlorine_range_from > chemical.chlorine_range_to or chemical.solid_alum_range_from > chemical.solid_alum_range_to or chemical.liquid_alum_range_from > chemical.liquid_alum_range_to:
+            return jsonify({"error": "قيمة من يجب أن تكون أصغر من قيمة إلى"}), 404
         try:
             db.session.commit()
         except IntegrityError as e:
@@ -735,8 +807,14 @@ def edit_chemical(chemical_id):
 
 @app.route("/new-chemical", methods=["GET", "POST"])
 def new_chemical():
+    all_techs = db.session.query(Technology).all()
+    techs_list = [tech.to_dict() for tech in all_techs]
+
+    water_sources = db.session.query(WaterSource).all()
+    sources_list = [source.to_dict() for source in water_sources]
     if request.method == "POST":
         data = request.get_json()
+        print(data)
         new_chemical_ref = AlumChlorineReference(
             technology_id=data['technology_id'],
             water_source_id=data['water_source_id'],
@@ -748,6 +826,8 @@ def new_chemical():
             liquid_alum_range_from=data['liquid_alum_range_from'],
             liquid_alum_range_to=data['liquid_alum_range_to']
         )
+        if new_chemical_ref.chlorine_range_from > new_chemical_ref.chlorine_range_to or new_chemical_ref.solid_alum_range_from > new_chemical_ref.solid_alum_range_to or new_chemical_ref.liquid_alum_range_from > new_chemical_ref.liquid_alum_range_to:
+            return jsonify({"error": "قيمة من يجب أن تكون أصغر من قيمة إلى"}), 404
         db.session.add(new_chemical_ref)
         try:
             db.session.commit()
@@ -771,7 +851,7 @@ def new_chemical():
                 }
             }
             return jsonify(response), 200
-    return jsonify({"response": "سبحان الله وبحمده، سبحان الله العظيم"})
+    return jsonify(techs=techs_list, water_sources=sources_list)
 
 
 @app.route("/register", methods=["GET", "POST"])

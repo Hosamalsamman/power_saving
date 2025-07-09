@@ -69,8 +69,8 @@ class Voltage(db.Model):
     __tablename__ = 'voltage'
     voltage_id = db.Column(Integer, primary_key=True)
     voltage_type = db.Column(NVARCHAR(50), nullable=False)
-    voltage_cost = db.Column(NVARCHAR(50), nullable=False)
-    fixed_fee = db.Column(Integer, nullable=False)
+    voltage_cost = db.Column(Float, nullable=False)
+    fixed_fee = db.Column(Float, nullable=False)
 
     guages = db.relationship('Gauge', back_populates='voltage')
     bills = db.relationship('GuageBill', back_populates='voltage')
@@ -93,7 +93,6 @@ class Gauge(db.Model):
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
         data['voltage_type'] = self.voltage.voltage_type if self.voltage else None
-        data.pop('voltage_id', None)
         return data
 
 class StationGaugeTechnology(db.Model):
@@ -192,8 +191,8 @@ class TechnologyBill(db.Model):
 
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
-        data['station_name'] = self.station_tech.station.station_name if self.station_tech else None
-        data['technology_name'] = self.station_tech.technology.technology_name if self.station_tech else None
+        data['station_name'] = self.station.station_name if self.station else None
+        data['technology_name'] = self.technology.technology_name if self.technology else None
         return data
 
     # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
@@ -228,6 +227,14 @@ class AlumChlorineReference(db.Model):
         data['technology_name'] = self.technology.technology_name if self.technology else None
         data['water_source_name'] = self.water_source.water_source_name if self.water_source else None
         return data
+
+    # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if not self.chemical_id:
+            # Get next available ID
+            max_id = db.session.query(db.func.max(AlumChlorineReference.chemical_id)).scalar()
+            self.chemical_id = (max_id or 0) + 1
 
 
 class Group(db.Model):
