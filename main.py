@@ -84,10 +84,12 @@ def home():
             "solid_alum": float(df_bills['technology_solid_alum_consump'].sum()),
             "liquid_alum": float(df_bills['technology_liquid_alum_consump'].sum())
         }
-
-        current_month = datetime.now().month
+        current_month = datetime.now().month - 1
+        if current_month == 0:
+            current_month = 12
+            current_year -= 1
         current_month_bills = db.session.query(TechnologyBill).filter(
-            TechnologyBill.bill_year == current_month).all()
+            TechnologyBill.bill_month == current_month, TechnologyBill.bill_year == current_year).all()
         over_power_consump = []
         over_chlorine_consump = []
         over_solid_alum_consump = []
@@ -96,15 +98,20 @@ def home():
             if bill.power_per_water:
                 if bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water:
                     over_power_consump.append(bill.to_dict())
-                if bill.technology_chlorine_consump / bill.technology_water_amount > bill.chlorine_range_to:
+                if (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from:
                     over_chlorine_consump.append(bill.to_dict())
-                if bill.technology_solid_alum_consump / bill.technology_water_amount > bill.solid_alum_range_to:
+                if (bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from:
                     over_solid_alum_consump.append(bill.to_dict())
-                if bill.technology_liquid_alum_consump / bill.technology_water_amount > bill.liquid_alum_range_to:
+                if (bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from:
                     over_liquid_alum_consump.append(bill.to_dict())
 
         return jsonify(
-            totals=totals,
+            power=totals['power'],
+            water=totals['water'],
+            money=totals['money'],
+            chlorine=totals['chlorine'],
+            solid_alum=totals['solid_alum'],
+            liquid_alum=totals['liquid_alum'],
             over_power_consump=over_power_consump,
             over_chlorine_consump=over_chlorine_consump,
             over_solid_alum_consump=over_solid_alum_consump,
