@@ -12,6 +12,14 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from datetime import datetime
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")     # ← force headless, non‑GUI backend
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import io
+import base64
+import arabic_reshaper
+from bidi.algorithm import get_display
 
 # import secrets
 #
@@ -859,6 +867,302 @@ def new_chemical():
             }
             return jsonify(response), 200
     return jsonify(techs=techs_list, water_sources=sources_list)
+
+
+@app.route("/analysis/<station_id>/<tech_id>")
+def show_charts(station_id, tech_id):
+    tech_bills = db.session.query(TechnologyBill).filter(
+        TechnologyBill.station_id == station_id,
+        TechnologyBill.technology_id == tech_id
+    ).all()
+    bills_list = [row.to_dict() for row in tech_bills]
+    df_bills = pd.DataFrame(bills_list)
+    df_bills.fillna(0, inplace=True)
+    df_bills.infer_objects(copy=False)
+    # Show all columns
+    pd.set_option('display.max_columns', None)
+    df_bills.technology_bill_total = pd.to_numeric(df_bills.technology_bill_total)
+    # add date column
+    df_bills['date'] = pd.to_datetime(
+        dict(
+            year=df_bills['bill_year'],
+            month=df_bills['bill_month'],
+            day=1  # first of each month
+        )
+    )
+    df_bills = df_bills.sort_values('date')
+
+    # power plot
+    plt.figure(figsize=(12, 6), dpi=120)
+    plt.title(get_display(arabic_reshaper.reshape('منحنى تغير معامل القدرة عبر الزمن')), fontsize=18)
+    plt.xticks(fontsize=14, rotation=45)
+    plt.yticks(fontsize=14)
+    ax1 = plt.gca()  # get current axes
+    ax2 = ax1.twinx()  # Create another axis that shares the same x-axis
+
+    years = mdates.YearLocator()
+    months = mdates.MonthLocator()
+    years_fmt = mdates.DateFormatter('%m/%Y')
+    ax1.xaxis.set_major_locator(months)
+    ax1.xaxis.set_major_formatter(years_fmt)
+    ax1.xaxis.set_minor_locator(months)
+
+    ax1.plot(df_bills.date, (df_bills.technology_power_consump / df_bills.technology_water_amount), color='blue', linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('معامل القدرة الفعلي')))
+    ax2.plot(df_bills.date, df_bills.power_per_water, 'green', linewidth=3, linestyle='dashed', label=get_display(arabic_reshaper.reshape('معامل القدرة القياسي')))
+    ax1.grid(color='grey', linestyle='--')
+    ax1.set_xlabel('شهر/سنة', fontsize=14)
+    ax1.set_ylabel(get_display(arabic_reshaper.reshape('معامل القدرة الفعلي')), color='blue', fontsize=14)
+    ax2.set_ylabel(get_display(arabic_reshaper.reshape('معامل القدرة القياسي')), color='green', fontsize=14)
+    # ax1.set_xlim([df_bills.date.min(), df_bills.date.max()])
+    # ax1.set_ylim([
+    #     (df_bills.technology_power_consump / df_bills.technology_water_amount).min(),
+    #     (df_bills.technology_power_consump / df_bills.technology_water_amount).max()
+    # ])
+    for x, y in zip(df_bills.date, df_bills.technology_power_consump / df_bills.technology_water_amount):
+        ax1.text(x, y, f"{y:.4f}", fontsize=9, color='blue', ha='center', va='bottom')
+    # Combine y-limits
+    y_min = min((df_bills.technology_power_consump / df_bills.technology_water_amount).min(), df_bills.power_per_water.min())
+    y_max = max((df_bills.technology_power_consump / df_bills.technology_water_amount).max(), df_bills.power_per_water.max())
+    y_pad = (y_max - y_min) * 0.1
+    y_min -= y_pad
+    y_max += y_pad
+    ax1.set_ylim(y_min, y_max)
+    ax2.set_ylim(y_min, y_max)
+
+    # Improve ticks
+    ax1.tick_params(axis='y', labelcolor='blue')
+    ax2.tick_params(axis='y', labelcolor='green')
+
+    # Axis labels
+    ax1.set_xlabel(get_display(arabic_reshaper.reshape('شهر/سنة')), fontsize=14)
+    ax1.set_ylabel(get_display(arabic_reshaper.reshape('معامل القدرة الفعلي')), fontsize=14, color='blue')
+    ax2.set_ylabel(get_display(arabic_reshaper.reshape('معامل القدرة القياسي')), fontsize=14, color='green')
+
+    # Grid
+    ax1.grid(color='grey', linestyle='--', alpha=0.5)
+
+    # Legend (outside)
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(
+        lines1 + lines2,
+        labels1 + labels2,
+        loc='center left',
+        bbox_to_anchor=(1.05, 1),
+        fontsize=12
+    )
+
+    # Make room for legend
+    plt.subplots_adjust(right=0.78)
+    img = io.BytesIO()
+    plt.savefig(img, format='png', bbox_inches='tight', dpi=120)
+    img.seek(0)
+    power_plot = base64.b64encode(img.read()).decode('utf-8')
+    plt.close()
+    ###########################################################################################################
+    # chlorine plot
+    plt.figure(figsize=(12, 6), dpi=120)
+    plt.title(get_display(arabic_reshaper.reshape('منحنى تغير نسبة استهلاك الكلور عبر الزمن')), fontsize=18)
+    plt.xticks(fontsize=14, rotation=45)
+    plt.yticks(fontsize=14)
+    ax1 = plt.gca()  # get current axes
+    ax2 = ax1.twinx()  # Create another axis that shares the same x-axis
+
+    years = mdates.YearLocator()
+    months = mdates.MonthLocator()
+    years_fmt = mdates.DateFormatter('%m/%Y')
+    ax1.xaxis.set_major_locator(months)
+    ax1.xaxis.set_major_formatter(years_fmt)
+    ax1.xaxis.set_minor_locator(months)
+
+    ax1.plot(df_bills.date, (df_bills.technology_chlorine_consump / df_bills.technology_water_amount), color='blue',
+             linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('الكلور الفعلي')))
+    ax2.plot(df_bills.date, df_bills.chlorine_range_from, 'green', linewidth=3, linestyle='dashed', label=get_display(arabic_reshaper.reshape('الحد الأدنى الموصى به')))
+    ax2.plot(df_bills.date, df_bills.chlorine_range_to, 'red', linewidth=3, linestyle='dashed', label=get_display(arabic_reshaper.reshape('الحد الأقصى الموصى به')))
+    ax1.grid(color='grey', linestyle='--')
+    ax1.set_xlabel(get_display(arabic_reshaper.reshape('شهر/سنة')), fontsize=14)
+    ax1.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الكلور الفعلي')), color='blue', fontsize=14)
+    ax2.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الكلور القياسي')), color='green', fontsize=14)
+    ax2.set_yticks(ax1.get_yticks())
+    ax2.fill_between(df_bills.date,
+                     df_bills.chlorine_range_from,
+                     df_bills.chlorine_range_to,
+                     color='green', alpha=0.1, label=get_display(arabic_reshaper.reshape('النطاق الموصى به')))
+    for x, y in zip(df_bills.date, df_bills.technology_chlorine_consump / df_bills.technology_water_amount):
+        ax1.text(x, y, f"{y:.4f}", fontsize=9, color='blue', ha='center', va='bottom')
+    # ax1.set_xlim([df_bills.date.min(), df_bills.date.max()])
+    # Get min and max of both series
+        # Combine y-limits
+        y_min = min((df_bills.technology_chlorine_consump / df_bills.technology_water_amount).min(),
+                    df_bills.chlorine_range_from.min())
+        y_max = max((df_bills.technology_chlorine_consump / df_bills.technology_water_amount).max(),
+                    df_bills.chlorine_range_to.max())
+        y_pad = (y_max - y_min) * 0.1
+        y_min -= y_pad
+        y_max += y_pad
+        ax1.set_ylim(y_min, y_max)
+        ax2.set_ylim(y_min, y_max)
+
+        # Improve ticks
+        ax1.tick_params(axis='y', labelcolor='blue')
+        ax2.tick_params(axis='y', labelcolor='green')
+
+    # Add combined legend
+    lines, labels = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(
+        lines + lines2, labels + labels2,
+        loc='center left',
+        bbox_to_anchor=(1.05, 1),
+        fontsize=12,
+        borderaxespad=0.
+    )
+    img = io.BytesIO()
+    plt.savefig(img, format='png', bbox_inches='tight', dpi=120)
+    img.seek(0)
+    chlorine_plot = base64.b64encode(img.read()).decode('utf-8')
+    plt.close()
+    ###########################################################################################################
+    # solid alum plot
+    plt.figure(figsize=(12, 6), dpi=120)
+    plt.title(get_display(arabic_reshaper.reshape('منحنى تغير نسبة استهلاك الشبة الصلبة عبر الزمن')), fontsize=18)
+    plt.xticks(fontsize=14, rotation=45)
+    plt.yticks(fontsize=14)
+    ax1 = plt.gca()  # get current axes
+    ax2 = ax1.twinx()  # Create another axis that shares the same x-axis
+
+    years = mdates.YearLocator()
+    months = mdates.MonthLocator()
+    years_fmt = mdates.DateFormatter('%m/%Y')
+    ax1.xaxis.set_major_locator(months)
+    ax1.xaxis.set_major_formatter(years_fmt)
+    ax1.xaxis.set_minor_locator(months)
+
+    ax1.plot(df_bills.date, (df_bills.technology_solid_alum_consump / df_bills.technology_water_amount), color='blue',
+             linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('الشبة الصلبة الفعلية')))
+    ax2.plot(df_bills.date, df_bills.solid_alum_range_from, 'green', linewidth=3, linestyle='dashed', label=get_display(arabic_reshaper.reshape('الحد الأدنى الموصى به')))
+    ax2.plot(df_bills.date, df_bills.solid_alum_range_to, 'red', linewidth=3, linestyle='dashed', label=get_display(arabic_reshaper.reshape('الحد الأقصى الموصى به')))
+    ax1.grid(color='grey', linestyle='--')
+    ax1.set_xlabel(get_display(arabic_reshaper.reshape('شهر/سنة')), fontsize=14)
+    ax1.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الشبة الصلبة الفعلي')), color='blue', fontsize=14)
+    ax2.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الشبة الصلبة القياسي')), color='green', fontsize=14)
+    ax2.set_yticks(ax1.get_yticks())
+    ax2.fill_between(df_bills.date,
+                     df_bills.solid_alum_range_from,
+                     df_bills.solid_alum_range_to,
+                     color='green', alpha=0.1, label=get_display(arabic_reshaper.reshape('النطاق الموصى به')))
+    for x, y in zip(df_bills.date, df_bills.technology_solid_alum_consump / df_bills.technology_water_amount):
+        ax1.text(x, y, f"{y:.4f}", fontsize=9, color='blue', ha='center', va='bottom')
+    # ax1.set_xlim([df_bills.date.min(), df_bills.date.max()])
+    # ax1.set_ylim([
+    #     (df_bills.technology_solid_alum_consump / df_bills.technology_water_amount).min(),
+    #     (df_bills.technology_solid_alum_consump / df_bills.technology_water_amount).max()
+    # ])
+        # Combine y-limits
+        y_min = min((df_bills.technology_solid_alum_consump / df_bills.technology_water_amount).min(),
+                    df_bills.solid_alum_range_from.min())
+        y_max = max((df_bills.technology_solid_alum_consump / df_bills.technology_water_amount).max(),
+                    df_bills.solid_alum_range_to.max())
+        y_pad = (y_max - y_min) * 0.1
+        y_min -= y_pad
+        y_max += y_pad
+        ax1.set_ylim(y_min, y_max)
+        ax2.set_ylim(y_min, y_max)
+
+        # Improve ticks
+        ax1.tick_params(axis='y', labelcolor='blue')
+        ax2.tick_params(axis='y', labelcolor='green')
+
+        # Add combined legend
+        lines, labels = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(
+            lines + lines2, labels + labels2,
+            loc='center left',
+            bbox_to_anchor=(1.05, 1),
+            fontsize=12,
+            borderaxespad=0.
+        )
+    img = io.BytesIO()
+    plt.savefig(img, format='png', bbox_inches='tight', dpi=120)
+    img.seek(0)
+    solid_alum_plot = base64.b64encode(img.read()).decode('utf-8')
+    plt.close()
+    ###########################################################################################################
+    # liquid alum plot
+    plt.figure(figsize=(12, 6), dpi=120)
+    plt.title(get_display(arabic_reshaper.reshape('منحنى تغير نسبة استهلاك الشبة السائلة عبر الزمن')), fontsize=18)
+    plt.xticks(fontsize=14, rotation=45)
+    plt.yticks(fontsize=14)
+    ax1 = plt.gca()  # get current axes
+    ax2 = ax1.twinx()  # Create another axis that shares the same x-axis
+
+    years = mdates.YearLocator()
+    months = mdates.MonthLocator()
+    years_fmt = mdates.DateFormatter('%m/%Y')
+    ax1.xaxis.set_major_locator(months)
+    ax1.xaxis.set_major_formatter(years_fmt)
+    ax1.xaxis.set_minor_locator(months)
+
+    ax1.plot(df_bills.date, (df_bills.technology_liquid_alum_consump / df_bills.technology_water_amount), color='blue',
+             linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('الشبة السائلة الفعلية')))
+    ax2.plot(df_bills.date, df_bills.liquid_alum_range_from, 'green', linewidth=3, linestyle='dashed',
+             label=get_display(arabic_reshaper.reshape('الحد الأدنى الموصى به')))
+    ax2.plot(df_bills.date, df_bills.liquid_alum_range_to, 'red', linewidth=3, linestyle='dashed',
+             label=get_display(arabic_reshaper.reshape('الحد الأقصى الموصى به')))
+    ax1.grid(color='grey', linestyle='--')
+    ax1.set_xlabel(get_display(arabic_reshaper.reshape('شهر/سنة')), fontsize=14)
+    ax1.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الشبة السائلة الفعلي')), color='blue', fontsize=14)
+    ax2.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الشبة السائلة القياسي')), color='green', fontsize=14)
+    ax2.set_yticks(ax1.get_yticks())
+    ax2.fill_between(df_bills.date,
+                     df_bills.liquid_alum_range_from,
+                     df_bills.liquid_alum_range_to,
+                     color='green', alpha=0.1, label=get_display(arabic_reshaper.reshape('النطاق الموصى به')))
+    for x, y in zip(df_bills.date, df_bills.technology_liquid_alum_consump / df_bills.technology_water_amount):
+        ax1.text(x, y, f"{y:.4f}", fontsize=9, color='blue', ha='center', va='bottom')
+        # ax1.set_xlim([df_bills.date.min(), df_bills.date.max()])
+        # ax1.set_ylim([
+        #     (df_bills.technology_liquid_alum_consump / df_bills.technology_water_amount).min(),
+        #     (df_bills.technology_liquid_alum_consump / df_bills.technology_water_amount).max()
+        # ])
+        # Combine y-limits
+        y_min = min((df_bills.technology_liquid_alum_consump / df_bills.technology_water_amount).min(),
+                    df_bills.liquid_alum_range_from.min())
+        y_max = max((df_bills.technology_liquid_alum_consump / df_bills.technology_water_amount).max(),
+                    df_bills.liquid_alum_range_to.max())
+        y_pad = (y_max - y_min) * 0.1
+        y_min -= y_pad
+        y_max += y_pad
+        ax1.set_ylim(y_min, y_max)
+        ax2.set_ylim(y_min, y_max)
+
+        # Improve ticks
+        ax1.tick_params(axis='y', labelcolor='blue')
+        ax2.tick_params(axis='y', labelcolor='green')
+
+        # Add combined legend
+        lines, labels = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(
+            lines + lines2, labels + labels2,
+            loc='center left',
+            bbox_to_anchor=(1.05, 1),
+            fontsize=12,
+            borderaxespad=0.
+        )
+    img = io.BytesIO()
+    plt.savefig(img, format='png', bbox_inches='tight', dpi=120)
+    img.seek(0)
+    liquid_alum_plot = base64.b64encode(img.read()).decode('utf-8')
+    return jsonify(
+        {
+            "power_plot": power_plot,
+            "chlorine_plot": chlorine_plot,
+            "solid_alum_plot": solid_alum_plot,
+            "liquid_alum_plot": liquid_alum_plot
+        }
+    )
 
 
 @app.route("/register", methods=["GET", "POST"])
