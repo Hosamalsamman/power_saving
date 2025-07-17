@@ -89,11 +89,40 @@ class Gauge(db.Model):
     voltage = db.relationship('Voltage', back_populates='guages')
     bills = db.relationship('GuageBill', back_populates='guage')
     station_techs = db.relationship('StationGaugeTechnology', back_populates='guage')
+    anuual_bills = db.relationship('AnuualBill', back_populates='gauge')
 
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
         data['voltage_type'] = self.voltage.voltage_type if self.voltage else None
         return data
+
+
+class AnuualBill(db.Model):
+    __tablename__ = 'anuual_bills'
+
+    anuual_bill_id = db.Column(db.Integer, nullable=False, unique=True)
+    account_number = db.Column(db.String(50), db.ForeignKey('guages.account_number'), nullable=False, primary_key=True)
+    financial_year = db.Column(db.Integer, nullable=False, primary_key=True)
+    reference_power_factor = db.Column(db.Float, nullable=False)
+    anuual_power_factor = db.Column(db.Float, nullable=False)
+    anuual_consump_cost = db.Column(Numeric(19, 4), nullable=False)
+    anuual_Rounding = db.Column(db.Float, nullable=False)
+    anuual_bill_total = db.Column(Numeric(19, 4), nullable=False)
+
+    gauge = db.relationship('Gauge', back_populates='anuual_bills')
+
+    # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if not self.anuual_bill_id:
+            # Get next available ID
+            max_id = db.session.query(db.func.max(AnuualBill.anuual_bill_id)).scalar()
+            self.anuual_bill_id = (max_id or 0) + 1
+
+    def to_dict(self):
+        data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        return data
+
 
 class StationGaugeTechnology(db.Model):
     __tablename__ = 'station_guage_technology'
@@ -137,9 +166,10 @@ class GuageBill(db.Model):
     power_consump = db.Column(BigInteger, nullable=False)
     voltage_id = db.Column(Integer, db.ForeignKey('voltage.voltage_id'), nullable=False)
     voltage_cost = db.Column(NVARCHAR(50), nullable=False)
-    # consump_cost = db.Column(Numeric(19, 4), nullable=False)
+    consump_cost = db.Column(Numeric(19, 4), nullable=False)
     fixed_installment = db.Column(Numeric(19, 4), nullable=False)
     settlements = db.Column(Numeric(19, 4), nullable=False)
+    settlement_qty = db.Column(Float, nullable=False)
     stamp = db.Column(Numeric(19, 4), nullable=False)
     prev_payments = db.Column(Numeric(19, 4), nullable=False)
     rounding = db.Column(Float, nullable=False)

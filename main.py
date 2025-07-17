@@ -514,9 +514,10 @@ def add_new_bill(account_number):
             power_consump=data['power_consump'],
             voltage_id=gauge.voltage_id,
             voltage_cost=gauge.voltage.voltage_cost,
-            # consump_cost=data['consump_cost'],
+            consump_cost=data['power_consump'] * gauge.voltage.voltage_cost,
             fixed_installment=data['fixed_installment'],
             settlements=data['settlements'],
+            settlement_qty=data['settlement_qty'],
             stamp=data['stamp'],
             prev_payments=data['prev_payments'],
             rounding=data['rounding'],
@@ -869,7 +870,7 @@ def new_chemical():
     return jsonify(techs=techs_list, water_sources=sources_list)
 
 
-@app.route("/analysis/<station_id>/<tech_id>")
+@app.route("/analysis-single/<station_id>/<tech_id>")
 def show_charts(station_id, tech_id):
     tech_bills = db.session.query(TechnologyBill).filter(
         TechnologyBill.station_id == station_id,
@@ -1163,6 +1164,73 @@ def show_charts(station_id, tech_id):
             "liquid_alum_plot": liquid_alum_plot
         }
     )
+
+
+@app.route("/annual-bills")
+def show_annual_bills():
+    bills = db.session.query(AnuualBill).all()
+    bills_list = [bill.to_dict() for bill in bills]
+    return jsonify(bills_list)
+
+
+@app.route("/new-annual-bill/<meter_id>", methods=["GET", "POST"])
+def new_annual_bill(meter_id):
+    if request.method == "POST":
+        data = request.get_json()
+        print(data)
+        gauge = db.session.query(Gauge).filter(Gauge.meter_id == meter_id).first()
+        bills = db.session.query(GuageBill).filter(
+            GuageBill.account_number == gauge.account_number,
+            or_(
+                and_(GuageBill.bill_year == data['financial_year'], GuageBill.bill_month > 6),
+                and_(GuageBill.bill_year == data['financial_year'] + 1, GuageBill.bill_month <= 6)
+            )
+        ).all()
+        if not bills:
+            return jsonify({"error": "لا يوجد فواتير مسجلة لهذا العداد"}), 410
+        calculated_total_consump = 0
+        for bill in bills:
+            calculated_total_consump += Decimal(str(bill.consump_cost))
+        calculated_annual_bill = (data['reference_power_factor'] - data['anuual_power_factor']) / 2 * calculated_total_consump + data['anuual_Rounding']
+        if int(calculated_total_consump) - int(data['anuual_consump_cost']) in range(-1, 2):
+            if int(calculated_annual_bill) - int(data['anuual_bill_total']) in range(-1, 2):
+                annual_bill = AnuualBill(
+                    account_number=gauge.account_number,
+                    financial_year=data['financial_year'],
+                    reference_power_factor=data['reference_power_factor'],
+                    anuual_power_factor=data['anuual_power_factor'],
+                    anuual_consump_cost=data['anuual_consump_cost'],
+                    anuual_Rounding=data['anuual_Rounding'],
+                    anuual_bill_total=data['anuual_bill_total']
+                )
+                db.session.add(annual_bill)
+                try:
+                    db.session.commit()
+                except IntegrityError as e:
+                    db.session.rollback()
+                    return jsonify(
+                        {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+                except DataError as e:
+                    db.session.rollback()
+                    return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+                except SQLAlchemyError as e:
+                    db.session.rollback()
+                    return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+                except Exception as e:
+                    db.session.rollback()
+                    return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+                else:
+                    response = {
+                        "response": {
+                            "success": "تم إدخال الفاتورة السنوية بنجاح"
+                        }
+                    }
+                    return jsonify(response), 200
+            else:
+                return jsonify({"error": f"{calculated_annual_bill}الإجمالي غير مطابق للبنود المدخلة "}), 406
+        else:
+            return jsonify({"error": f"{calculated_total_consump}قيمة الاستهلاك الكلي لا يساوي مجموع الفواتير المسجلة لدينا "}), 405
+    return jsonify({"response": "لا إله إلا الله وحده لا شريك له له الملك وله الحمد وهو على كل شيء قدير"})
 
 
 @app.route("/register", methods=["GET", "POST"])
