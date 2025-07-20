@@ -20,6 +20,8 @@ import io
 import base64
 import arabic_reshaper
 from bidi.algorithm import get_display
+import seaborn as sns
+from sklearn.linear_model import LinearRegression
 
 # import secrets
 #
@@ -1231,6 +1233,70 @@ def new_annual_bill(meter_id):
         else:
             return jsonify({"error": f"{calculated_total_consump}قيمة الاستهلاك الكلي لا يساوي مجموع الفواتير المسجلة لدينا "}), 405
     return jsonify({"response": "لا إله إلا الله وحده لا شريك له له الملك وله الحمد وهو على كل شيء قدير"})
+
+
+@app.route("/prediction/<station_id>")
+def predict(station_id):
+    station_bills = db.session.query(TechnologyBill).filter(
+        TechnologyBill.station_id == station_id,
+        TechnologyBill.technology_water_amount is not None
+    ).all()
+    bills_list = [bill.to_dict() for bill in station_bills]
+
+    df_bills = pd.DataFrame(bills_list)
+    df_year_bills = df_bills.groupby(['station_id', 'bill_year'], as_index=False).agg(
+        {'technology_water_amount': pd.Series.sum}
+    )
+    print(df_year_bills)
+    plt.figure(figsize=(8, 4), dpi=200)
+    with sns.axes_style("darkgrid"):
+        ax = sns.regplot(data=df_year_bills,
+                         x='bill_year',
+                         y='technology_water_amount',
+                         scatter_kws={'alpha': 0.4,
+                                      'color': '#2f4b7c'},
+                         line_kws={'color': '#ff7c43'})
+    ax.set(
+           ylabel=f'{get_display(arabic_reshaper.reshape('المياه المنتجة'))}',
+           xlabel=f'{get_display(arabic_reshaper.reshape('السنوات'))}',
+    )
+    # Save to BytesIO buffer
+    img = io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(img, format='png', dpi=200, bbox_inches='tight')
+    img.seek(0)  # Rewind the buffer
+
+    # Encode image to Base64
+    prediction_base64 = base64.b64encode(img.read()).decode('utf-8')
+
+    regression = LinearRegression()
+
+    # Explanatory Variable(s) or Feature(s)
+    X = pd.DataFrame(df_year_bills, columns=['bill_year'])
+
+    # Response Variable or Target
+    y = pd.DataFrame(df_year_bills, columns=['technology_water_amount'])
+
+    # Find the best-fit line
+    regression.fit(X, y)
+
+    # theta zero
+    print(f"The intercept is: {regression.intercept_[0]}")
+    # theta one
+    print(f"The slope coeficient is: {regression.coef_[0]}")
+
+    # R-squared
+    points_represented = regression.score(X, y)
+
+    max_water_amount = station_bills[0].station.station_water_capacity
+    expected_year = (max_water_amount - regression.intercept_[0]) / regression.coef_[0, 0]
+    result = {
+        "prediction_plot": prediction_base64,
+        "water_capacity": max_water_amount,
+        "represented_points": points_represented * 100,
+        "expected_year": expected_year
+    }
+    return jsonify(result)
 
 
 @app.route("/register", methods=["GET", "POST"])
