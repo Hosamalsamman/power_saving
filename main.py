@@ -903,12 +903,12 @@ def show_charts(station_id, tech_id):
     ax1 = plt.gca()  # get current axes
     ax2 = ax1.twinx()  # Create another axis that shares the same x-axis
 
-    years = mdates.YearLocator()
-    months = mdates.MonthLocator()
-    years_fmt = mdates.DateFormatter('%m/%Y')
-    ax1.xaxis.set_major_locator(months)
-    ax1.xaxis.set_major_formatter(years_fmt)
-    ax1.xaxis.set_minor_locator(months)
+    ax1.set_xticks(df_bills.date)
+    ax1.set_xticklabels(
+        [d.strftime('%m/%Y') for d in df_bills.date],
+        rotation=45,
+        fontsize=12
+    )
 
     ax1.plot(df_bills.date, (df_bills.technology_power_consump / df_bills.technology_water_amount), color='blue', linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('معامل القدرة الفعلي')))
     ax2.plot(df_bills.date, df_bills.power_per_water, 'green', linewidth=3, linestyle='dashed', label=get_display(arabic_reshaper.reshape('معامل القدرة القياسي')))
@@ -971,12 +971,12 @@ def show_charts(station_id, tech_id):
     ax1 = plt.gca()  # get current axes
     ax2 = ax1.twinx()  # Create another axis that shares the same x-axis
 
-    years = mdates.YearLocator()
-    months = mdates.MonthLocator()
-    years_fmt = mdates.DateFormatter('%m/%Y')
-    ax1.xaxis.set_major_locator(months)
-    ax1.xaxis.set_major_formatter(years_fmt)
-    ax1.xaxis.set_minor_locator(months)
+    ax1.set_xticks(df_bills.date)
+    ax1.set_xticklabels(
+        [d.strftime('%m/%Y') for d in df_bills.date],
+        rotation=45,
+        fontsize=12
+    )
 
     ax1.plot(df_bills.date, (df_bills.technology_chlorine_consump / df_bills.technology_water_amount), color='blue',
              linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('الكلور الفعلي')))
@@ -1034,12 +1034,12 @@ def show_charts(station_id, tech_id):
     ax1 = plt.gca()  # get current axes
     ax2 = ax1.twinx()  # Create another axis that shares the same x-axis
 
-    years = mdates.YearLocator()
-    months = mdates.MonthLocator()
-    years_fmt = mdates.DateFormatter('%m/%Y')
-    ax1.xaxis.set_major_locator(months)
-    ax1.xaxis.set_major_formatter(years_fmt)
-    ax1.xaxis.set_minor_locator(months)
+    ax1.set_xticks(df_bills.date)
+    ax1.set_xticklabels(
+        [d.strftime('%m/%Y') for d in df_bills.date],
+        rotation=45,
+        fontsize=12
+    )
 
     ax1.plot(df_bills.date, (df_bills.technology_solid_alum_consump / df_bills.technology_water_amount), color='blue',
              linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('الشبة الصلبة الفعلية')))
@@ -1100,12 +1100,12 @@ def show_charts(station_id, tech_id):
     ax1 = plt.gca()  # get current axes
     ax2 = ax1.twinx()  # Create another axis that shares the same x-axis
 
-    years = mdates.YearLocator()
-    months = mdates.MonthLocator()
-    years_fmt = mdates.DateFormatter('%m/%Y')
-    ax1.xaxis.set_major_locator(months)
-    ax1.xaxis.set_major_formatter(years_fmt)
-    ax1.xaxis.set_minor_locator(months)
+    ax1.set_xticks(df_bills.date)
+    ax1.set_xticklabels(
+        [d.strftime('%m/%Y') for d in df_bills.date],
+        rotation=45,
+        fontsize=12
+    )
 
     ax1.plot(df_bills.date, (df_bills.technology_liquid_alum_consump / df_bills.technology_water_amount), color='blue',
              linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('الشبة السائلة الفعلية')))
