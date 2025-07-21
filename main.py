@@ -22,6 +22,7 @@ import arabic_reshaper
 from bidi.algorithm import get_display
 import seaborn as sns
 from sklearn.linear_model import LinearRegression
+import pyodbc
 
 # import secrets
 #
@@ -870,6 +871,20 @@ def new_chemical():
             }
             return jsonify(response), 200
     return jsonify(techs=techs_list, water_sources=sources_list)
+
+
+@app.route("/station-techs")
+def show_station_techs():
+    stations = db.session.query(Station).all()
+    stations_list = []
+    for i in range(len(stations)):
+        stations_list.append(stations[i].to_dict())
+        stations_list[i]['techs'] = []
+        for station_tech in stations[i].station_techs:
+            if station_tech.technology.to_dict() not in stations_list[i]['techs']:
+                stations_list[i]['techs'].append(station_tech.technology.to_dict())
+
+    return jsonify(stations_list)
 
 
 @app.route("/analysis-single/<station_id>/<tech_id>")
