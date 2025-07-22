@@ -175,6 +175,7 @@ class GuageBill(db.Model):
     rounding = db.Column(Float, nullable=False)
     bill_total = db.Column(Numeric(19, 4), nullable=False)
     is_paid = db.Column(Boolean, nullable=False)
+    notes = db.Column(NVARCHAR(4000), nullable=True)
 
     guage = db.relationship('Gauge', back_populates='bills')
     voltage = db.relationship('Voltage', back_populates='bills')
@@ -200,7 +201,7 @@ class TechnologyBill(db.Model):
     bill_year = db.Column(Integer, primary_key=True)
     station_id = db.Column(Integer, db.ForeignKey('stations.station_id'), primary_key=True)
     technology_id = db.Column(Integer, db.ForeignKey('technologies.technology_id'), primary_key=True)
-    technology_bill_percentage = db.Column(Float, nullable=False)
+    # technology_bill_percentage = db.Column(Float, nullable=False)
     technology_power_consump = db.Column(BigInteger, nullable=False)
     technology_liquid_alum_consump = db.Column(BigInteger)
     technology_solid_alum_consump = db.Column(BigInteger)

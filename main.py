@@ -525,7 +525,8 @@ def add_new_bill(account_number):
             prev_payments=data['prev_payments'],
             rounding=data['rounding'],
             bill_total=data['bill_total'],
-            is_paid=data['is_paid']
+            is_paid=data['is_paid'],
+            notes=data['notes']
         )
         # check prev-reading
         if new_bill.prev_reading != gauge.final_reading:
@@ -634,18 +635,16 @@ def add_new_bill(account_number):
                         TechnologyBill.bill_month == new_bill.bill_month,
                         TechnologyBill.bill_year == new_bill.bill_year).first()
                     if current_tech_bill:
-                        current_tech_bill.technology_power_consump += (
-                                    new_bill.power_consump * data['percent'][i] / 100)
-                        current_tech_bill.technology_bill_total += (new_bill.bill_total * data['percent'][i] / 100)
+                        current_tech_bill.technology_power_consump += data['percent_power'][i]
+                        current_tech_bill.technology_bill_total += data['percent_money'][i]
                     else:
                         tech_bill = TechnologyBill(
                             station_id=gauge_sgts[i].station_id,
                             technology_id=gauge_sgts[i].technology_id,
                             bill_month=new_bill.bill_month,
                             bill_year=new_bill.bill_year,
-                            technology_bill_percentage=data.get('percent')[i],
-                            technology_power_consump=new_bill.power_consump * data['percent'][i] / 100,
-                            technology_bill_total=new_bill.bill_total * data['percent'][i] / 100
+                            technology_power_consump=data['percent_power'][i],
+                            technology_bill_total=data['percent_money'][i]
                         )
                         db.session.add(tech_bill)
             db.session.commit()
@@ -895,7 +894,7 @@ def show_charts(station_id, tech_id):
     ).all()
     bills_list = [row.to_dict() for row in tech_bills]
     df_bills = pd.DataFrame(bills_list)
-    df_bills.fillna(0, inplace=True)
+    df_bills.dropna(inplace=True)
     df_bills.infer_objects(copy=False)
     # Show all columns
     pd.set_option('display.max_columns', None)
@@ -909,6 +908,7 @@ def show_charts(station_id, tech_id):
         )
     )
     df_bills = df_bills.sort_values('date')
+    print(df_bills)
 
     # power plot
     plt.figure(figsize=(12, 6), dpi=120)
