@@ -555,29 +555,29 @@ def add_new_bill(account_number):
                 Decimal(str(new_bill.prev_payments)) +
                 Decimal(str(new_bill.rounding))
         )
-        # # Convert all values to Decimal
-        # current_reading = Decimal(new_bill.current_reading)
-        # prev_reading = Decimal(new_bill.prev_reading)
-        # reading_factor = Decimal(new_bill.reading_factor)
-        # voltage_cost = Decimal(new_bill.voltage_cost)
-        # fixed_installment = Decimal(new_bill.fixed_installment)
-        # settlements = Decimal(new_bill.settlements)
-        # stamp = Decimal(str(new_bill.stamp))
-        # prev_payments = Decimal(new_bill.prev_payments)
-        # rounding = Decimal(str(new_bill.rounding))
+        # Convert all values to Decimal
+        current_reading = Decimal(new_bill.current_reading)
+        prev_reading = Decimal(new_bill.prev_reading)
+        reading_factor = Decimal(new_bill.reading_factor)
+        voltage_cost = Decimal(new_bill.voltage_cost)
+        fixed_installment = Decimal(new_bill.fixed_installment)
+        settlements = Decimal(new_bill.settlements)
+        stamp = Decimal(str(new_bill.stamp))
+        prev_payments = Decimal(new_bill.prev_payments)
+        rounding = Decimal(str(new_bill.rounding))
 
-        # # Print all values
-        # print(f"power consump       : {reading_diff * reading_factor}")
-        # print(f"Current Reading     : {current_reading}")
-        # print(f"Previous Reading    : {prev_reading}")
-        # print(f"Reading Factor      : {reading_factor}")
-        # print(f"Voltage Cost        : {voltage_cost}")
-        # print(f"Fixed Installment   : {fixed_installment}")
-        # print(f"Settlements         : {settlements}")
-        # print(f"Stamp               : {stamp}")
-        # print(f"Previous Payments   : {prev_payments}")
-        # print(f"Rounding            : {rounding}")
-        # print(calculated_bill_total)
+        # Print all values
+        print(f"power consump       : {reading_diff * reading_factor}")
+        print(f"Current Reading     : {current_reading}")
+        print(f"Previous Reading    : {prev_reading}")
+        print(f"Reading Factor      : {reading_factor}")
+        print(f"Voltage Cost        : {voltage_cost}")
+        print(f"Fixed Installment   : {fixed_installment}")
+        print(f"Settlements         : {settlements}")
+        print(f"Stamp               : {stamp}")
+        print(f"Previous Payments   : {prev_payments}")
+        print(f"Rounding            : {rounding}")
+        print(calculated_bill_total)
         if int(calculated_bill_total) - int(new_bill.bill_total) not in range(-1, 2):
             return jsonify({
                 "error": "إجمالي الفاتورة غير مطابق لمجموع البنود المدخلة، برجاء مراجعة بنود الفاتورة وتعريفة الجهد لهذا العداد"}), 412
@@ -620,7 +620,6 @@ def add_new_bill(account_number):
                         technology_id=gauge_sgts[0].technology_id,
                         bill_month=new_bill.bill_month,
                         bill_year=new_bill.bill_year,
-                        technology_bill_percentage=100,
                         technology_power_consump=new_bill.power_consump,
                         technology_bill_total=new_bill.bill_total
                     )

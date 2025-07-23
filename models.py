@@ -94,6 +94,8 @@ class Gauge(db.Model):
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
         data['voltage_type'] = self.voltage.voltage_type if self.voltage else None
+        data['voltage_cost'] = self.voltage.voltage_cost if self.voltage else None
+        data['fixed_fee'] = self.voltage.fixed_fee if self.voltage else None
         return data
 
 
