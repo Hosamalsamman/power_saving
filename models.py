@@ -203,7 +203,7 @@ class TechnologyBill(db.Model):
     bill_year = db.Column(Integer, primary_key=True)
     station_id = db.Column(Integer, db.ForeignKey('stations.station_id'), primary_key=True)
     technology_id = db.Column(Integer, db.ForeignKey('technologies.technology_id'), primary_key=True)
-    # technology_bill_percentage = db.Column(Float, nullable=False)
+    technology_bill_percentage = db.Column(Float, nullable=False)
     technology_power_consump = db.Column(BigInteger, nullable=False)
     technology_liquid_alum_consump = db.Column(BigInteger)
     technology_solid_alum_consump = db.Column(BigInteger)
