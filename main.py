@@ -13,7 +13,8 @@ from functools import wraps
 from datetime import datetime
 import pandas as pd
 import matplotlib
-matplotlib.use("Agg")     # ← force headless, non‑GUI backend
+
+matplotlib.use("Agg")  # ← force headless, non‑GUI backend
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import io
@@ -109,11 +110,14 @@ def home():
             if bill.power_per_water:
                 if bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water:
                     over_power_consump.append(bill.to_dict())
-                if (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from:
+                if (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (
+                        bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from:
                     over_chlorine_consump.append(bill.to_dict())
-                if (bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from:
+                if (bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (
+                        bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from:
                     over_solid_alum_consump.append(bill.to_dict())
-                if (bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from:
+                if (bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
+                        bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from:
                     over_liquid_alum_consump.append(bill.to_dict())
 
         return jsonify(
@@ -645,19 +649,19 @@ def add_new_bill(account_number):
                         TechnologyBill.bill_year == new_bill.bill_year).first()
                     if current_tech_bill:
                         if not current_tech_bill.technology_bill_percentage:
-                            current_tech_bill.technology_power_consump += new_bill.power_consump #add it any way and divide it according to water amount
-                            current_tech_bill.technology_bill_total += new_bill.bill_total #add it any way and divide it according to water amount
+                            current_tech_bill.technology_power_consump += new_bill.power_consump  #add it any way and divide it according to water amount
+                            current_tech_bill.technology_bill_total += new_bill.bill_total  #add it any way and divide it according to water amount
                         else:
-                            current_tech_bill.technology_power_consump += new_bill.power_consump * current_tech_bill.technology_bill_percentage
-                            current_tech_bill.technology_bill_total += new_bill.bill_total * current_tech_bill.technology_bill_percentage
+                            current_tech_bill.technology_power_consump += new_bill.power_consump * current_tech_bill.technology_bill_percentage / 100
+                            current_tech_bill.technology_bill_total += Decimal(float(new_bill.bill_total) * current_tech_bill.technology_bill_percentage / 100)
                     else:
                         tech_bill = TechnologyBill(
                             station_id=gauge_sgts[i].station_id,
                             technology_id=gauge_sgts[i].technology_id,
                             bill_month=new_bill.bill_month,
                             bill_year=new_bill.bill_year,
-                            technology_power_consump=new_bill.power_consump, #add it any way and divide it according to water amount
-                            technology_bill_total=new_bill.bill_total #add it any way and divide it according to water amount
+                            technology_power_consump=new_bill.power_consump,    #add it any way and divide it according to water amount
+                            technology_bill_total=new_bill.bill_total           #add it any way and divide it according to water amount
                         )
                         db.session.add(tech_bill)
             db.session.commit()
@@ -667,7 +671,7 @@ def add_new_bill(account_number):
                 }
             }
             return jsonify(response), 200
-    return jsonify(gauge_sgt_list=gauge_sgt_list)           #, show_percent=show_percent
+    return jsonify(gauge_sgt_list=gauge_sgt_list)  #, show_percent=show_percent
 
 
 @app.route("/tech-bills")
@@ -725,8 +729,11 @@ def edit_tech_bill(tech_bill_id):
             sgt = db.session.query(StationGaugeTechnology).filter(
                 StationGaugeTechnology.station_id == bill.station_id,
                 StationGaugeTechnology.technology_id == bill.technology_id).first()
+            print(sgt.to_dict())
             gauge_sgts = db.session.query(StationGaugeTechnology).filter(
-                StationGaugeTechnology.account_number == sgt.account_number).all()
+                StationGaugeTechnology.account_number == sgt.account_number,
+                StationGaugeTechnology.relation_status == True).all()
+            print(gauge_sgts)
             related_bills = []
             for gauge_sgt in gauge_sgts:
                 related_bill = db.session.query(TechnologyBill).filter(
@@ -736,6 +743,7 @@ def edit_tech_bill(tech_bill_id):
                     TechnologyBill.bill_year == bill.bill_year
                 ).first()
                 related_bills.append(related_bill)
+            print(related_bills)
             # check if all bills have water amount values
             # calculate total amount
             should_calculate = True
@@ -749,9 +757,9 @@ def edit_tech_bill(tech_bill_id):
             # apply for power and bill
             if should_calculate:
                 for each_bill in related_bills:
-                    each_bill.technology_bill_percentage = each_bill.technology_water_amount / total_water_amount * 100
-                    each_bill.technology_power_consump = each_bill.technology_water_amount / total_water_amount * each_bill.technology_power_consump
-                    each_bill.technology_bill_total = each_bill.technology_water_amount / total_water_amount * each_bill.technology_bill_total
+                    each_bill.technology_bill_percentage = float(Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * 100)
+                    each_bill.technology_power_consump = float(Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * Decimal(str(each_bill.technology_power_consump)))
+                    each_bill.technology_bill_total = float(Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * Decimal(str(each_bill.technology_bill_total)))
 
         try:
             db.session.commit()
@@ -764,6 +772,7 @@ def edit_tech_bill(tech_bill_id):
             return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
         except SQLAlchemyError as e:
             db.session.rollback()
+            print(e)
             return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
         except Exception as e:
             db.session.rollback()
@@ -971,8 +980,10 @@ def show_charts(station_id, tech_id):
         fontsize=12
     )
 
-    ax1.plot(df_bills.date, (df_bills.technology_power_consump / df_bills.technology_water_amount), color='blue', linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('معامل القدرة الفعلي')))
-    ax2.plot(df_bills.date, df_bills.power_per_water, 'green', linewidth=3, linestyle='dashed', label=get_display(arabic_reshaper.reshape('معامل القدرة القياسي')))
+    ax1.plot(df_bills.date, (df_bills.technology_power_consump / df_bills.technology_water_amount), color='blue',
+             linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('معامل القدرة الفعلي')))
+    ax2.plot(df_bills.date, df_bills.power_per_water, 'green', linewidth=3, linestyle='dashed',
+             label=get_display(arabic_reshaper.reshape('معامل القدرة القياسي')))
     ax1.grid(color='grey', linestyle='--')
     ax1.set_xlabel('شهر/سنة', fontsize=14)
     ax1.set_ylabel(get_display(arabic_reshaper.reshape('معامل القدرة الفعلي')), color='blue', fontsize=14)
@@ -985,8 +996,10 @@ def show_charts(station_id, tech_id):
     for x, y in zip(df_bills.date, df_bills.technology_power_consump / df_bills.technology_water_amount):
         ax1.text(x, y, f"{y:.4f}", fontsize=9, color='blue', ha='center', va='bottom')
     # Combine y-limits
-    y_min = min((df_bills.technology_power_consump / df_bills.technology_water_amount).min(), df_bills.power_per_water.min())
-    y_max = max((df_bills.technology_power_consump / df_bills.technology_water_amount).max(), df_bills.power_per_water.max())
+    y_min = min((df_bills.technology_power_consump / df_bills.technology_water_amount).min(),
+                df_bills.power_per_water.min())
+    y_max = max((df_bills.technology_power_consump / df_bills.technology_water_amount).max(),
+                df_bills.power_per_water.max())
     y_pad = (y_max - y_min) * 0.1
     y_min -= y_pad
     y_max += y_pad
@@ -1041,8 +1054,10 @@ def show_charts(station_id, tech_id):
 
     ax1.plot(df_bills.date, (df_bills.technology_chlorine_consump / df_bills.technology_water_amount), color='blue',
              linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('الكلور الفعلي')))
-    ax2.plot(df_bills.date, df_bills.chlorine_range_from, 'green', linewidth=3, linestyle='dashed', label=get_display(arabic_reshaper.reshape('الحد الأدنى الموصى به')))
-    ax2.plot(df_bills.date, df_bills.chlorine_range_to, 'red', linewidth=3, linestyle='dashed', label=get_display(arabic_reshaper.reshape('الحد الأقصى الموصى به')))
+    ax2.plot(df_bills.date, df_bills.chlorine_range_from, 'green', linewidth=3, linestyle='dashed',
+             label=get_display(arabic_reshaper.reshape('الحد الأدنى الموصى به')))
+    ax2.plot(df_bills.date, df_bills.chlorine_range_to, 'red', linewidth=3, linestyle='dashed',
+             label=get_display(arabic_reshaper.reshape('الحد الأقصى الموصى به')))
     ax1.grid(color='grey', linestyle='--')
     ax1.set_xlabel(get_display(arabic_reshaper.reshape('شهر/سنة')), fontsize=14)
     ax1.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الكلور الفعلي')), color='blue', fontsize=14)
@@ -1054,8 +1069,8 @@ def show_charts(station_id, tech_id):
                      color='green', alpha=0.1, label=get_display(arabic_reshaper.reshape('النطاق الموصى به')))
     for x, y in zip(df_bills.date, df_bills.technology_chlorine_consump / df_bills.technology_water_amount):
         ax1.text(x, y, f"{y:.4f}", fontsize=9, color='blue', ha='center', va='bottom')
-    # ax1.set_xlim([df_bills.date.min(), df_bills.date.max()])
-    # Get min and max of both series
+        # ax1.set_xlim([df_bills.date.min(), df_bills.date.max()])
+        # Get min and max of both series
         # Combine y-limits
         y_min = min((df_bills.technology_chlorine_consump / df_bills.technology_water_amount).min(),
                     df_bills.chlorine_range_from.min())
@@ -1104,12 +1119,15 @@ def show_charts(station_id, tech_id):
 
     ax1.plot(df_bills.date, (df_bills.technology_solid_alum_consump / df_bills.technology_water_amount), color='blue',
              linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('الشبة الصلبة الفعلية')))
-    ax2.plot(df_bills.date, df_bills.solid_alum_range_from, 'green', linewidth=3, linestyle='dashed', label=get_display(arabic_reshaper.reshape('الحد الأدنى الموصى به')))
-    ax2.plot(df_bills.date, df_bills.solid_alum_range_to, 'red', linewidth=3, linestyle='dashed', label=get_display(arabic_reshaper.reshape('الحد الأقصى الموصى به')))
+    ax2.plot(df_bills.date, df_bills.solid_alum_range_from, 'green', linewidth=3, linestyle='dashed',
+             label=get_display(arabic_reshaper.reshape('الحد الأدنى الموصى به')))
+    ax2.plot(df_bills.date, df_bills.solid_alum_range_to, 'red', linewidth=3, linestyle='dashed',
+             label=get_display(arabic_reshaper.reshape('الحد الأقصى الموصى به')))
     ax1.grid(color='grey', linestyle='--')
     ax1.set_xlabel(get_display(arabic_reshaper.reshape('شهر/سنة')), fontsize=14)
     ax1.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الشبة الصلبة الفعلي')), color='blue', fontsize=14)
-    ax2.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الشبة الصلبة القياسي')), color='green', fontsize=14)
+    ax2.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الشبة الصلبة القياسي')), color='green',
+                   fontsize=14)
     ax2.set_yticks(ax1.get_yticks())
     ax2.fill_between(df_bills.date,
                      df_bills.solid_alum_range_from,
@@ -1117,11 +1135,11 @@ def show_charts(station_id, tech_id):
                      color='green', alpha=0.1, label=get_display(arabic_reshaper.reshape('النطاق الموصى به')))
     for x, y in zip(df_bills.date, df_bills.technology_solid_alum_consump / df_bills.technology_water_amount):
         ax1.text(x, y, f"{y:.4f}", fontsize=9, color='blue', ha='center', va='bottom')
-    # ax1.set_xlim([df_bills.date.min(), df_bills.date.max()])
-    # ax1.set_ylim([
-    #     (df_bills.technology_solid_alum_consump / df_bills.technology_water_amount).min(),
-    #     (df_bills.technology_solid_alum_consump / df_bills.technology_water_amount).max()
-    # ])
+        # ax1.set_xlim([df_bills.date.min(), df_bills.date.max()])
+        # ax1.set_ylim([
+        #     (df_bills.technology_solid_alum_consump / df_bills.technology_water_amount).min(),
+        #     (df_bills.technology_solid_alum_consump / df_bills.technology_water_amount).max()
+        # ])
         # Combine y-limits
         y_min = min((df_bills.technology_solid_alum_consump / df_bills.technology_water_amount).min(),
                     df_bills.solid_alum_range_from.min())
@@ -1176,8 +1194,10 @@ def show_charts(station_id, tech_id):
              label=get_display(arabic_reshaper.reshape('الحد الأقصى الموصى به')))
     ax1.grid(color='grey', linestyle='--')
     ax1.set_xlabel(get_display(arabic_reshaper.reshape('شهر/سنة')), fontsize=14)
-    ax1.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الشبة السائلة الفعلي')), color='blue', fontsize=14)
-    ax2.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الشبة السائلة القياسي')), color='green', fontsize=14)
+    ax1.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الشبة السائلة الفعلي')), color='blue',
+                   fontsize=14)
+    ax2.set_ylabel(get_display(arabic_reshaper.reshape('معامل استهلاك الشبة السائلة القياسي')), color='green',
+                   fontsize=14)
     ax2.set_yticks(ax1.get_yticks())
     ax2.fill_between(df_bills.date,
                      df_bills.liquid_alum_range_from,
@@ -1254,7 +1274,8 @@ def new_annual_bill(meter_id):
         calculated_total_consump = 0
         for bill in bills:
             calculated_total_consump += Decimal(str(bill.consump_cost))
-        calculated_annual_bill = (data['reference_power_factor'] - data['anuual_power_factor']) / 2 * calculated_total_consump + data['anuual_Rounding']
+        calculated_annual_bill = (data['reference_power_factor'] - data[
+            'anuual_power_factor']) / 2 * calculated_total_consump + data['anuual_Rounding']
         if int(calculated_total_consump) - int(data['anuual_consump_cost']) in range(-1, 2):
             if int(calculated_annual_bill) - int(data['anuual_bill_total']) in range(-1, 2):
                 annual_bill = AnuualBill(
@@ -1292,7 +1313,8 @@ def new_annual_bill(meter_id):
             else:
                 return jsonify({"error": f"{calculated_annual_bill}الإجمالي غير مطابق للبنود المدخلة "}), 406
         else:
-            return jsonify({"error": f"{calculated_total_consump}قيمة الاستهلاك الكلي لا يساوي مجموع الفواتير المسجلة لدينا "}), 405
+            return jsonify({
+                               "error": f"{calculated_total_consump}قيمة الاستهلاك الكلي لا يساوي مجموع الفواتير المسجلة لدينا "}), 405
     return jsonify({"response": "لا إله إلا الله وحده لا شريك له له الملك وله الحمد وهو على كل شيء قدير"})
 
 
@@ -1302,6 +1324,8 @@ def predict(station_id):
         TechnologyBill.station_id == station_id,
         TechnologyBill.technology_water_amount is not None
     ).all()
+    if not station_bills:
+        return jsonify({"error": "لا يوجد بيانات لهذه المحطة"}), 410
     bills_list = [bill.to_dict() for bill in station_bills]
 
     df_bills = pd.DataFrame(bills_list)
@@ -1318,8 +1342,8 @@ def predict(station_id):
                                       'color': '#2f4b7c'},
                          line_kws={'color': '#ff7c43'})
     ax.set(
-           ylabel=f'{get_display(arabic_reshaper.reshape('المياه المنتجة'))}',
-           xlabel=f'{get_display(arabic_reshaper.reshape('السنوات'))}',
+        ylabel=f'{get_display(arabic_reshaper.reshape('المياه المنتجة'))}',
+        xlabel=f'{get_display(arabic_reshaper.reshape('السنوات'))}',
     )
     # Save to BytesIO buffer
     img = io.BytesIO()
