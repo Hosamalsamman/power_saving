@@ -178,6 +178,8 @@ class GuageBill(db.Model):
     bill_total = db.Column(Numeric(19, 4), nullable=False)
     is_paid = db.Column(Boolean, nullable=False)
     notes = db.Column(NVARCHAR(4000), nullable=True)
+    delay_month = db.Column(Integer, nullable=True)
+    delay_year = db.Column(Integer, nullable=True)
 
     guage = db.relationship('Gauge', back_populates='bills')
     voltage = db.relationship('Voltage', back_populates='bills')

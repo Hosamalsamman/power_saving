@@ -530,7 +530,9 @@ def add_new_bill(account_number):
             rounding=data['rounding'],
             bill_total=data['bill_total'],
             is_paid=data['is_paid'],
-            notes=data['notes']
+            notes=data['notes'],
+            delay_month=data['delay_month'],
+            delay_year=data['delay_year']
         )
         # check prev-reading
         if new_bill.prev_reading != gauge.final_reading:
