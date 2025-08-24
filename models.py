@@ -22,7 +22,7 @@ class Branch(db.Model):
 
 class Technology(db.Model):
     __tablename__ = 'technologies'
-    technology_id = db.Column(Integer, primary_key=True)
+    technology_id = db.Column(Integer, primary_key=True, autoincrement=True)
     technology_name = db.Column(NVARCHAR(200), unique=True, nullable=False)
     power_per_water = db.Column(Float, nullable=False)
 
@@ -35,7 +35,7 @@ class Technology(db.Model):
 
 class WaterSource(db.Model):
     __tablename__ = 'water_source'
-    water_source_id = db.Column(Integer, primary_key=True)
+    water_source_id = db.Column(Integer, primary_key=True, autoincrement=True)
     water_source_name = db.Column(NVARCHAR(400), unique=True, nullable=False)
 
     stations = db.relationship('Station', back_populates='water_source')
@@ -67,7 +67,7 @@ class Station(db.Model):
 
 class Voltage(db.Model):
     __tablename__ = 'voltage'
-    voltage_id = db.Column(Integer, primary_key=True)
+    voltage_id = db.Column(Integer, primary_key=True, autoincrement=True)
     voltage_type = db.Column(NVARCHAR(50), nullable=False)
     voltage_cost = db.Column(Float, nullable=False)
     fixed_fee = db.Column(Float, nullable=False)
@@ -102,8 +102,8 @@ class Gauge(db.Model):
 class AnuualBill(db.Model):
     __tablename__ = 'anuual_bills'
 
-    anuual_bill_id = db.Column(db.Integer, nullable=False, unique=True)
-    account_number = db.Column(db.String(50), db.ForeignKey('guages.account_number'), nullable=False, primary_key=True)
+    anuual_bill_id = db.Column(db.Integer, nullable=False, unique=True, autoincrement=True)
+    account_number = db.Column(NVARCHAR(50), db.ForeignKey('guages.account_number'), nullable=False, primary_key=True)
     financial_year = db.Column(db.Integer, nullable=False, primary_key=True)
     reference_power_factor = db.Column(db.Float, nullable=False)
     anuual_power_factor = db.Column(db.Float, nullable=False)
@@ -113,13 +113,13 @@ class AnuualBill(db.Model):
 
     gauge = db.relationship('Gauge', back_populates='anuual_bills')
 
-    # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if not self.anuual_bill_id:
-            # Get next available ID
-            max_id = db.session.query(db.func.max(AnuualBill.anuual_bill_id)).scalar()
-            self.anuual_bill_id = (max_id or 0) + 1
+    # # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
+    # def __init__(self, **kwargs):
+    #     super().__init__(**kwargs)
+    #     if not self.anuual_bill_id:
+    #         # Get next available ID
+    #         max_id = db.session.query(db.func.max(AnuualBill.anuual_bill_id)).scalar()
+    #         self.anuual_bill_id = (max_id or 0) + 1
 
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -128,7 +128,7 @@ class AnuualBill(db.Model):
 
 class StationGaugeTechnology(db.Model):
     __tablename__ = 'station_guage_technology'
-    station_guage_technology_id = db.Column(db.Integer, unique=True, nullable=False, autoincrement=True)
+    station_guage_technology_id = db.Column(db.Integer, unique=True, nullable=False, autoincrement=True, server_default=db.FetchedValue())
     station_id = db.Column(Integer, db.ForeignKey('stations.station_id'), primary_key=True)
     technology_id = db.Column(Integer, db.ForeignKey('technologies.technology_id'), primary_key=True)
     account_number = db.Column(NVARCHAR(50), db.ForeignKey('guages.account_number'), primary_key=True)
@@ -138,13 +138,13 @@ class StationGaugeTechnology(db.Model):
     technology = db.relationship('Technology', back_populates='station_techs')
     guage = db.relationship('Gauge', back_populates='station_techs')
 
-    # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if not self.station_guage_technology_id:
-            # Get next available ID
-            max_id = db.session.query(db.func.max(StationGaugeTechnology.station_guage_technology_id)).scalar()
-            self.station_guage_technology_id = (max_id or 0) + 1
+    # # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
+    # def __init__(self, **kwargs):
+    #     super().__init__(**kwargs)
+    #     if not self.station_guage_technology_id:
+    #         # Get next available ID
+    #         max_id = db.session.query(db.func.max(StationGaugeTechnology.station_guage_technology_id)).scalar()
+    #         self.station_guage_technology_id = (max_id or 0) + 1
 
 
     def to_dict(self):
@@ -158,7 +158,7 @@ class StationGaugeTechnology(db.Model):
 
 class GuageBill(db.Model):
     __tablename__ = 'guage_bill'
-    guage_bill_id = db.Column(Integer, unique=True, nullable=False)
+    guage_bill_id = db.Column(Integer, unique=True, nullable=False, autoincrement=True, server_default=db.FetchedValue())
     account_number = db.Column(NVARCHAR(50), db.ForeignKey('guages.account_number'), primary_key=True)
     bill_month = db.Column(Integer, primary_key=True)
     bill_year = db.Column(Integer, primary_key=True)
@@ -189,18 +189,18 @@ class GuageBill(db.Model):
         data['voltage_type'] = self.voltage.voltage_type if self.voltage else None
         return data
 
-    # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if not self.guage_bill_id:
-            # Get next available ID
-            max_id = db.session.query(db.func.max(GuageBill.guage_bill_id)).scalar()
-            self.guage_bill_id = (max_id or 0) + 1
+    # # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
+    # def __init__(self, **kwargs):
+    #     super().__init__(**kwargs)
+    #     if not self.guage_bill_id:
+    #         # Get next available ID
+    #         max_id = db.session.query(db.func.max(GuageBill.guage_bill_id)).scalar()
+    #         self.guage_bill_id = (max_id or 0) + 1
 
 
 class TechnologyBill(db.Model):
     __tablename__ = 'technology_bill'
-    tech_bill_id = db.Column(Integer, unique=True, nullable=False)
+    tech_bill_id = db.Column(Integer, unique=True, nullable=False, autoincrement=True, server_default=db.FetchedValue())
     bill_month = db.Column(Integer, primary_key=True)
     bill_year = db.Column(Integer, primary_key=True)
     station_id = db.Column(Integer, db.ForeignKey('stations.station_id'), primary_key=True)
@@ -230,21 +230,21 @@ class TechnologyBill(db.Model):
         data['technology_name'] = self.technology.technology_name if self.technology else None
         return data
 
-    # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if not self.tech_bill_id:
-            # Get next available ID
-            max_id = db.session.query(db.func.max(TechnologyBill.tech_bill_id)).scalar()
-            self.tech_bill_id = (max_id or 0) + 1
+    # # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
+    # def __init__(self, **kwargs):
+    #     super().__init__(**kwargs)
+    #     if not self.tech_bill_id:
+    #         # Get next available ID
+    #         max_id = db.session.query(db.func.max(TechnologyBill.tech_bill_id)).scalar()
+    #         self.tech_bill_id = (max_id or 0) + 1
 
 
 class AlumChlorineReference(db.Model):
     __tablename__ = 'alum_chlorine_reference'
-    chemical_id = db.Column(Integer, unique=True, nullable=False)
+    chemical_id = db.Column(Integer, unique=True, nullable=False, autoincrement=True, server_default=db.FetchedValue())
     technology_id = db.Column(db.Integer, db.ForeignKey('technologies.technology_id'), primary_key=True)
     water_source_id = db.Column(db.Integer, db.ForeignKey('water_source.water_source_id'), primary_key=True)
-    season = db.Column(db.String, primary_key=True)
+    season = db.Column(NVARCHAR(20), primary_key=True)
 
     chlorine_range_from = db.Column(Float, nullable=False)
     chlorine_range_to = db.Column(Float, nullable=False)
@@ -263,18 +263,18 @@ class AlumChlorineReference(db.Model):
         data['water_source_name'] = self.water_source.water_source_name if self.water_source else None
         return data
 
-    # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if not self.chemical_id:
-            # Get next available ID
-            max_id = db.session.query(db.func.max(AlumChlorineReference.chemical_id)).scalar()
-            self.chemical_id = (max_id or 0) + 1
+    # # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
+    # def __init__(self, **kwargs):
+    #     super().__init__(**kwargs)
+    #     if not self.chemical_id:
+    #         # Get next available ID
+    #         max_id = db.session.query(db.func.max(AlumChlorineReference.chemical_id)).scalar()
+    #         self.chemical_id = (max_id or 0) + 1
 
 
 class Group(db.Model):
     __tablename__ = 'groups'
-    group_id = db.Column(Integer, primary_key=True)
+    group_id = db.Column(Integer, primary_key=True, autoincrement=True)
     group_name = db.Column(NVARCHAR(400), unique=True, nullable=False)
     group_notification = db.Column(NVARCHAR(1000))
 
@@ -287,7 +287,7 @@ class Group(db.Model):
 
 class Permission(db.Model):
     __tablename__ = 'premessions'
-    permession_id = db.Column(Integer, primary_key=True)
+    permession_id = db.Column(Integer, primary_key=True, autoincrement=True)
     permession_name = db.Column(NVARCHAR(400), unique=True, nullable=False)
 
     group_permissions = db.relationship('GroupPermission', back_populates='permission')

@@ -78,7 +78,8 @@ def get_season(month):
 def home():
     current_year = datetime.now().year
     current_year_tech_bills = db.session.query(TechnologyBill).filter(
-        TechnologyBill.bill_year == current_year
+        TechnologyBill.bill_year == current_year,
+        TechnologyBill.technology_bill_percentage != None
     ).all()
     if current_year_tech_bills:
         bills_list = [row.to_dict() for row in current_year_tech_bills]
@@ -101,23 +102,24 @@ def home():
             current_month = 12
             current_year -= 1
         current_month_bills = db.session.query(TechnologyBill).filter(
-            TechnologyBill.bill_month == current_month, TechnologyBill.bill_year == current_year).all()
+            TechnologyBill.bill_month == current_month,
+            TechnologyBill.bill_year == current_year).all()
         over_power_consump = []
         over_chlorine_consump = []
         over_solid_alum_consump = []
         over_liquid_alum_consump = []
         for bill in current_month_bills:
             if bill.power_per_water:
-                if bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water:
+                if bill.technology_bill_percentage and (bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water):
                     over_power_consump.append(bill.to_dict())
-                if (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (
-                        bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from:
+                if bill.chlorine_range_to and ((bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (
+                        bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from):
                     over_chlorine_consump.append(bill.to_dict())
-                if (bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (
-                        bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from:
+                if bill.solid_alum_range_to and ((bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (
+                        bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from):
                     over_solid_alum_consump.append(bill.to_dict())
-                if (bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
-                        bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from:
+                if bill.liquid_alum_range_to and ((bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
+                        bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from):
                     over_liquid_alum_consump.append(bill.to_dict())
 
         return jsonify(
@@ -149,6 +151,7 @@ def edit_station(station_id):
 
     if request.method == "POST":
         data = request.get_json()
+        print(data)
         station.station_name = data['name']
         station.branch_id = data['branch_id']
         station.station_type = data['station_type']
@@ -242,6 +245,7 @@ def edit_tech(tech_id):
     tech = db.session.get(Technology, tech_id)
     if request.method == "POST":
         data = request.get_json()
+        print(data)
         tech.technology_name = data['technology_name']
         tech.power_per_water = data['power_per_water']
 
@@ -366,6 +370,7 @@ def add_new_gauge():
     v_t_list = [v_t.to_dict() for v_t in voltage_types]
     if request.method == "POST":
         data = request.get_json()
+        print(data)
         new_gauge = Gauge(
             account_number=data['account_number'],
             meter_id=data['meter_id'],
@@ -496,13 +501,14 @@ def add_new_bill(account_number):
     gauge_sgts = db.session.query(StationGaugeTechnology).filter(
         and_(
             StationGaugeTechnology.account_number == account_number,
-            StationGaugeTechnology.relation_status.is_(True)
+            StationGaugeTechnology.relation_status == True
         )
     ).all()
 
     # if len(gauge_sgts) > 1:
     #     show_percent = True
     gauge_sgt_list = [r.to_dict() for r in gauge_sgts]
+    print(gauge_sgt_list)
     if not gauge_sgts:
         return jsonify(gauge_sgt_list=gauge_sgt_list,
                        error={"error": "هذا العداد غير مرتبط بمحطة، برجاء ربط العداد أولا"}), 409
@@ -680,14 +686,7 @@ def add_new_bill(account_number):
 def show_null_tech_bills():
     # Comprehensive check for various "empty" values
     all_tech_bills = db.session.query(TechnologyBill).filter(
-        or_(
-            TechnologyBill.technology_water_amount.is_(None),  # NULL
-            TechnologyBill.technology_water_amount == '',  # Empty string
-            TechnologyBill.technology_water_amount == 'NULL',  # String "NULL"
-            TechnologyBill.technology_water_amount == 'null',  # String "null"
-            TechnologyBill.technology_water_amount == '0',  # String "0"
-            TechnologyBill.technology_water_amount == 0  # Integer 0
-        )
+        TechnologyBill.technology_water_amount == None
     ).all()
     tech_bills_list = [t_b.to_dict() for t_b in all_tech_bills]
     print(tech_bills_list)
@@ -698,8 +697,8 @@ def show_null_tech_bills():
 def edit_tech_bill(tech_bill_id):
     bill = db.session.query(TechnologyBill).filter(TechnologyBill.tech_bill_id == tech_bill_id).first()
     # make old rows uneditable
-    if bill.technology_bill_percentage:
-        return jsonify({"response": "لا يمكن تعديل البيانات التاريخية للنظام"}), 400
+    # if bill.technology_bill_percentage:
+    #     return jsonify({"response": "لا يمكن تعديل البيانات التاريخية للنظام"}), 420
 
     if request.method == "POST":
         data = request.get_json()
@@ -1324,7 +1323,7 @@ def new_annual_bill(meter_id):
 def predict(station_id):
     station_bills = db.session.query(TechnologyBill).filter(
         TechnologyBill.station_id == station_id,
-        TechnologyBill.technology_water_amount is not None
+        TechnologyBill.technology_water_amount != None
     ).all()
     if not station_bills:
         return jsonify({"error": "لا يوجد بيانات لهذه المحطة"}), 410
@@ -1332,7 +1331,7 @@ def predict(station_id):
 
     df_bills = pd.DataFrame(bills_list)
     df_year_bills = df_bills.groupby(['station_id', 'bill_year'], as_index=False).agg(
-        {'technology_water_amount': pd.Series.sum}
+        {'technology_water_amount': pd.Series.mean}
     )
     print(df_year_bills)
     plt.figure(figsize=(8, 4), dpi=200)
@@ -1375,7 +1374,7 @@ def predict(station_id):
     # R-squared
     points_represented = regression.score(X, y)
 
-    max_water_amount = station_bills[0].station.station_water_capacity
+    max_water_amount = station_bills[0].station.station_water_capacity * 30
     expected_year = (max_water_amount - regression.intercept_[0]) / regression.coef_[0, 0]
     result = {
         "prediction_plot": prediction_base64,
