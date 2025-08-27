@@ -1389,9 +1389,10 @@ def predict(station_id):
 def register():
     if request.method == "POST":
         data = request.get_json()
+        print(data)
         user = db.session.query(User).filter(User.username == data['username']).first()
         if user:
-            return jsonify({"response": "يوجد حساب بهذا الاسم، جرب تسجيل الدخول بدلا من إنشاء حساب جديد"}), 401
+            return jsonify({"error": "يوجد حساب بهذا الاسم، جرب تسجيل الدخول بدلا من إنشاء حساب جديد"}), 401
         hash_and_salted_password = generate_password_hash(
             data['password'],
             method='pbkdf2:sha256',
@@ -1400,7 +1401,7 @@ def register():
         new_user = User(
             emp_code=data['emp_code'],
             emp_name=data['emp_name'],
-            username=data['username'],
+            username=data['username'].lower(),
             userpassword=hash_and_salted_password,
             is_active=False
         )
@@ -1408,6 +1409,7 @@ def register():
         try:
             db.session.commit()
         except IntegrityError as e:
+            print(e)
             db.session.rollback()
             return jsonify(
                 {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
@@ -1482,15 +1484,15 @@ def login():
         data = request.get_json()
         user = db.session.query(User).filter(User.username == data['username']).first()
 
-        if not user or not check_password_hash(user.password, data['password']):
-            return jsonify({"response": "اسم مستخدم أو كلمة مرور خاطئة"}), 401
+        if not user or not check_password_hash(user.userpassword, data['password']):
+            return jsonify({"error": "اسم مستخدم أو كلمة مرور خاطئة"}), 401
         else:
             if user.is_active:
                 login_user(user)
                 return jsonify(current_user=current_user.to_dict()), 200
             else:
                 return jsonify({
-                    "response": "هذا الحساب غير مفعل، برجاء مراجعة الادارة العامة لتكنولوجيا المعلومات لتفعيل حسابك"}), 401
+                    "error": "هذا الحساب غير مفعل، برجاء مراجعة الادارة العامة لتكنولوجيا المعلومات لتفعيل حسابك"}), 410
     return jsonify({"response": "لا إله إلا الله"})
 
 

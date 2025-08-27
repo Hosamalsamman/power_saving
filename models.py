@@ -323,6 +323,11 @@ class User(UserMixin, db.Model):
 
     group = db.relationship('Group', back_populates='users')
 
+    # Optional if you don’t want to rename your PK
+    def get_id(self):
+        return str(self.emp_code)  # must return a string
+
+
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
         data['group_name'] = self.group.group_name if self.group else None
