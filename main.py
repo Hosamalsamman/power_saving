@@ -121,21 +121,56 @@ def home():
                 if bill.liquid_alum_range_to and ((bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
                         bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from):
                     over_liquid_alum_consump.append(bill.to_dict())
+                # query with group by station to compare with water capacity
+                query = (
+                    db.session.query(
+                        TechnologyBill.station_id,
+                        TechnologyBill.bill_year,
+                        TechnologyBill.bill_month,
+                        func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                        Station.station_name,
+                        Station.station_water_capacity,
+                    )
+                    .join(Station, Station.station_id == TechnologyBill.station_id)  # 👈 Explicit join
+                    .filter(TechnologyBill.bill_year == current_year)
+                    .filter(TechnologyBill.bill_month == current_month)
+                    .filter(TechnologyBill.technology_water_amount.isnot(None))
+                    .group_by(
+                        TechnologyBill.station_id,
+                        TechnologyBill.bill_year,
+                        TechnologyBill.bill_month,
+                        Station.station_name,
+                        Station.station_water_capacity,
+                    )
+                    .having(func.sum(TechnologyBill.technology_water_amount) > Station.station_water_capacity * 30)
+                )
+                bills = query.all()
+                over_water_bills_list = [
+                    {
+                        "station_name": bill.station_name,
+                        "year": bill.bill_year,
+                        "month": bill.bill_month,
+                        "total_water": float(bill.total_water) if bill.total_water else 0,
+                        "water_capacity": bill.station_water_capacity,
+                        "capacity_limit": bill.station_water_capacity * 30
+                    } for bill in bills
+                ]
 
-        return jsonify(
-            power=totals['power'],
-            water=totals['water'],
-            money=totals['money'],
-            chlorine=totals['chlorine'],
-            solid_alum=totals['solid_alum'],
-            liquid_alum=totals['liquid_alum'],
-            over_power_consump=over_power_consump,
-            over_chlorine_consump=over_chlorine_consump,
-            over_solid_alum_consump=over_solid_alum_consump,
-            over_liquid_alum_consump=over_liquid_alum_consump
-        )
+                return jsonify(
+                    power=totals['power'],
+                    water=totals['water'],
+                    money=totals['money'],
+                    chlorine=totals['chlorine'],
+                    solid_alum=totals['solid_alum'],
+                    liquid_alum=totals['liquid_alum'],
+                    over_power_consump=over_power_consump,
+                    over_chlorine_consump=over_chlorine_consump,
+                    over_solid_alum_consump=over_solid_alum_consump,
+                    over_liquid_alum_consump=over_liquid_alum_consump,
+                    over_water_stations=over_water_bills_list
+                )
 
-    return jsonify({"message": "برجاء تسجيل الفواتير لمتابعة الاستهلاكات السنوية"})
+            return jsonify({"message": "برجاء تسجيل الفواتير لمتابعة الاستهلاكات السنوية"})
 
 
 @app.route("/stations")
@@ -1446,6 +1481,8 @@ def show_reports():
                     func.sum(TechnologyBill.technology_liquid_alum_consump).label("total_liquid_alum"),
                     func.sum(TechnologyBill.technology_solid_alum_consump).label("total_solid_alum")
                 )
+                query = query.join(Technology,
+                                   Technology.technology_id == TechnologyBill.technology_id)  # 👈 Explicit join
                 # Complex date range across years
                 query = query.filter(
                     or_(
@@ -1458,12 +1495,12 @@ def show_reports():
                     )
                 )
                 query = query.filter(TechnologyBill.technology_bill_percent.isnot(None))
-                query = query.select_from(TechnologyBill)
-                query = query.group_by(TechnologyBill.technology_id, TechnologyBill.bill_year, TechnologyBill.bill_month)
+                query = query.group_by(TechnologyBill.technology_id, TechnologyBill.bill_year,
+                                       TechnologyBill.bill_month, Technology.technology_name)
                 bills = query.all()
                 bills_list = [
                     {
-                        "technology_name": bill.technology.technology_name,
+                        "technology_name": bill.technology_name,
                         "year": bill.bill_year,
                         "month": bill.bill_month,
                         "total_bill": float(bill.total_bill) if bill.total_bill else 0,
