@@ -282,6 +282,7 @@ def edit_tech(tech_id):
         print(data)
         tech.technology_name = data['technology_name']
         tech.power_per_water = data['power_per_water']
+        tech.technology_main_type = data['technology_main_type']
 
         try:
             db.session.commit()
@@ -319,6 +320,7 @@ def add_new_tech():
         new_tech = Technology(
             technology_name=data['technology_name'],
             power_per_water=data['power_per_water'],
+            technology_main_type=data['technology_main_type']
         )
 
         db.session.add(new_tech)
@@ -1632,17 +1634,16 @@ def show_reports():
                 } for bill in bills
             ]
             return jsonify(station_bills_list)
-        elif data['report_name'] == "water-stations-3-month":
+        elif data['report_name'] == "water-techs-3-month":
             query = (
                 db.session.query(
-                    TechnologyBill.station_id,
+                    Technology.technology_main_type,
                     func.sum(TechnologyBill.technology_water_amount).label("total_water"),
                     func.sum(TechnologyBill.technology_power_consump).label("total_power"),
-                    func.sum(TechnologyBill.technology_bill_total).label("total_bill"),
-                    Station.station_name,
-                    Station.station_type
+                    func.sum(TechnologyBill.technology_bill_total).label("total_bill")
                 )
-                .join(TechnologyBill.station)
+                .join(TechnologyBill.technology)
+                .join(TechnologyBill.station)  # Needed for Station filtering
                 .filter(
                     or_(
                         and_(TechnologyBill.bill_year == data['start_year'],
@@ -1654,31 +1655,34 @@ def show_reports():
                     )
                 )
                 .filter(TechnologyBill.technology_bill_percentage.isnot(None))
-                .filter(Station.station_type == "مياة")
-                .group_by(TechnologyBill.station_id, Station.station_name, Station.station_type)
+                .filter(Station.station_type == "مياة")  # Filter by station type
+                .group_by(Technology.technology_main_type)  # ✅ Only group by main type
             )
+
             bills = query.all()
+
             station_bills_list = [
                 {
-                    "station_name": bill.station_name,
+                    "technology_main_type": bill.technology_main_type,
                     "total_water": float(bill.total_water) if bill.total_water else 0,
                     "total_power": float(bill.total_power) if bill.total_power else 0,
                     "total_bill": float(bill.total_bill) if bill.total_bill else 0,
                     "percent": float(bill.total_bill) / float(bill.total_power) if bill.total_power else 0,
                 } for bill in bills
             ]
+
             return jsonify(station_bills_list)
-        elif data['report_name'] == "sanity-stations-3-month":
+
+        elif data['report_name'] == "sanity-techs-3-month":
             query = (
                 db.session.query(
-                    TechnologyBill.station_id,
+                    Technology.technology_main_type,
                     func.sum(TechnologyBill.technology_water_amount).label("total_water"),
                     func.sum(TechnologyBill.technology_power_consump).label("total_power"),
-                    func.sum(TechnologyBill.technology_bill_total).label("total_bill"),
-                    Station.station_name,
-                    Station.station_type
+                    func.sum(TechnologyBill.technology_bill_total).label("total_bill")
                 )
-                .join(TechnologyBill.station)
+                .join(TechnologyBill.technology)
+                .join(TechnologyBill.station)  # Needed for Station filtering
                 .filter(
                     or_(
                         and_(TechnologyBill.bill_year == data['start_year'],
@@ -1690,19 +1694,22 @@ def show_reports():
                     )
                 )
                 .filter(TechnologyBill.technology_bill_percentage.isnot(None))
-                .filter(Station.station_type == "صرف")
-                .group_by(TechnologyBill.station_id, Station.station_name, Station.station_type)
+                .filter(Station.station_type == "صرف")  # Filter by station type
+                .group_by(Technology.technology_main_type)  # ✅ Only group by main type
             )
+
             bills = query.all()
+
             station_bills_list = [
                 {
-                    "station_name": bill.station_name,
+                    "technology_main_type": bill.technology_main_type,
                     "total_water": float(bill.total_water) if bill.total_water else 0,
                     "total_power": float(bill.total_power) if bill.total_power else 0,
                     "total_bill": float(bill.total_bill) if bill.total_bill else 0,
                     "percent": float(bill.total_bill) / float(bill.total_power) if bill.total_power else 0,
                 } for bill in bills
             ]
+
             return jsonify(station_bills_list)
     return jsonify({"response": "سبحان الله وبحمده"})   # current_user.group.to_dict()
 

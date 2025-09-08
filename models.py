@@ -25,6 +25,7 @@ class Technology(db.Model):
     technology_id = db.Column(Integer, primary_key=True, autoincrement=True)
     technology_name = db.Column(NVARCHAR(200), unique=True, nullable=False)
     power_per_water = db.Column(Float, nullable=False)
+    technology_main_type = db.Column(NVARCHAR(20), nullable=False)
 
     station_techs = db.relationship('StationGaugeTechnology', back_populates='technology')
     technology_bills = db.relationship('TechnologyBill', back_populates='technology')
