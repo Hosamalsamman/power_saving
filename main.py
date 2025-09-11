@@ -67,6 +67,18 @@ with app.app_context():
 
 
 # Create my own decorators and functions
+
+def private_routes(allowed_groups):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if current_user.group_id not in allowed_groups:
+                return abort(403)
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+
 def get_season(month):
     if month in range(4, 11):  # 11 is exclusive, so covers 4 to 10
         return "summer"
