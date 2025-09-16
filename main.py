@@ -993,6 +993,31 @@ def new_chemical():
             db.session.rollback()
             return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
         else:
+            # search for related tech bills with None reference values
+            if new_chemical_ref.season == "summer":
+                bills = db.session.query(TechnologyBill).filter(
+                    TechnologyBill.bill_month.between(4, 10),
+                    TechnologyBill.technology_id == new_chemical_ref.technology_id,
+                    TechnologyBill.station.has(Station.water_source_id == new_chemical_ref.water_source_id),
+                    TechnologyBill.chlorine_range_from == None,
+                ).all()
+            else:
+                bills = db.session.query(TechnologyBill).filter(
+                    not_(TechnologyBill.bill_month.between(4, 10)),
+                    TechnologyBill.technology_id == new_chemical_ref.technology_id,
+                    TechnologyBill.station.has(Station.water_source_id == new_chemical_ref.water_source_id),
+                    TechnologyBill.chlorine_range_from == None,
+                ).all()
+            # set corresponding ref. values
+            for bill in bills:
+                bill.chlorine_range_from = new_chemical_ref.chlorine_range_from
+                bill.chlorine_range_to = new_chemical_ref.chlorine_range_to
+                bill.liquid_alum_range_from = new_chemical_ref.liquid_alum_range_from
+                bill.liquid_alum_range_to = new_chemical_ref.liquid_alum_range_to
+                bill.solid_alum_range_from = new_chemical_ref.solid_alum_range_from
+                bill.solid_alum_range_to = new_chemical_ref.solid_alum_range_to
+
+            db.session.commit()
             response = {
                 "response": {
                     "success": "تم إدخال القيم المرجعية بنجاح"
