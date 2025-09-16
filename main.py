@@ -1009,13 +1009,14 @@ def new_chemical():
                     TechnologyBill.chlorine_range_from == None,
                 ).all()
             # set corresponding ref. values
-            for bill in bills:
-                bill.chlorine_range_from = new_chemical_ref.chlorine_range_from
-                bill.chlorine_range_to = new_chemical_ref.chlorine_range_to
-                bill.liquid_alum_range_from = new_chemical_ref.liquid_alum_range_from
-                bill.liquid_alum_range_to = new_chemical_ref.liquid_alum_range_to
-                bill.solid_alum_range_from = new_chemical_ref.solid_alum_range_from
-                bill.solid_alum_range_to = new_chemical_ref.solid_alum_range_to
+            if bills:
+                for bill in bills:
+                    bill.chlorine_range_from = new_chemical_ref.chlorine_range_from
+                    bill.chlorine_range_to = new_chemical_ref.chlorine_range_to
+                    bill.liquid_alum_range_from = new_chemical_ref.liquid_alum_range_from
+                    bill.liquid_alum_range_to = new_chemical_ref.liquid_alum_range_to
+                    bill.solid_alum_range_from = new_chemical_ref.solid_alum_range_from
+                    bill.solid_alum_range_to = new_chemical_ref.solid_alum_range_to
 
             db.session.commit()
             response = {
