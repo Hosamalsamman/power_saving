@@ -24,6 +24,8 @@ from bidi.algorithm import get_display
 import seaborn as sns
 from sklearn.linear_model import LinearRegression
 import pyodbc
+from flask_migrate import Migrate  # Add this import
+from sqlalchemy import text
 
 # import secrets
 #
@@ -65,6 +67,8 @@ db.init_app(app)
 with app.app_context():
     db.create_all()
 
+# Add this line to enable migrations
+migrate = Migrate(app, db)
 
 # Create my own decorators and functions
 
@@ -77,6 +81,95 @@ def private_route(allowed_groups):
             return f(*args, **kwargs)
         return decorated_function
     return decorator
+
+
+def create_indexes_mssql():
+    with app.app_context():
+        try:
+            # Create indexes directly with SQL Server syntax
+            indexes = [
+                """
+                IF NOT EXISTS (SELECT name FROM sys.indexes WHERE name = 'idx_tech_year_month')
+                    CREATE INDEX idx_tech_year_month ON technology_bill (technology_id, bill_year, bill_month)
+                """,
+                """
+                IF NOT EXISTS (SELECT name FROM sys.indexes WHERE name = 'idx_station_year_month')
+                    CREATE INDEX idx_station_year_month ON technology_bill (station_id, bill_year, bill_month)
+                """,
+                """
+                IF NOT EXISTS (SELECT name FROM sys.indexes WHERE name = 'idx_bill_year')
+                    CREATE INDEX idx_bill_year ON technology_bill (bill_year)
+                """,
+                """
+                IF NOT EXISTS (SELECT name FROM sys.indexes WHERE name = 'idx_technology_id')
+                    CREATE INDEX idx_technology_id ON technology_bill (technology_id)
+                """,
+                """
+                IF NOT EXISTS (SELECT name FROM sys.indexes WHERE name = 'idx_station_id')
+                    CREATE INDEX idx_station_id ON technology_bill (station_id)
+                """,
+                """
+                IF NOT EXISTS (SELECT name FROM sys.indexes WHERE name = 'idx_bill_year_month')
+                    CREATE INDEX idx_bill_year_month ON technology_bill (bill_year, bill_month)
+                """
+            ]
+
+            for index_sql in indexes:
+                db.session.execute(text(index_sql))
+                db.session.commit()
+
+            print("✅ All indexes created successfully on SQL Server!")
+
+            # Verify indexes (compatible with older SQL Server versions)
+            result = db.session.execute(text("""
+                            SELECT i.name as index_name, 
+                                   t.name as table_name
+                            FROM sys.indexes i
+                            JOIN sys.tables t ON i.object_id = t.object_id
+                            WHERE t.name = 'technology_bill' 
+                            AND i.name LIKE 'idx_%'
+                            ORDER BY i.name
+                        """))
+
+            print("\n📋 Created indexes:")
+            for row in result:
+                print(f"  ✅ {row.index_name} on {row.table_name}")
+
+            # Get detailed column info for each index
+            detailed_result = db.session.execute(text("""
+                            SELECT 
+                                i.name as index_name,
+                                c.name as column_name,
+                                ic.key_ordinal
+                            FROM sys.indexes i
+                            JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+                            JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+                            JOIN sys.tables t ON i.object_id = t.object_id
+                            WHERE t.name = 'technology_bill' 
+                            AND i.name LIKE 'idx_%'
+                            ORDER BY i.name, ic.key_ordinal
+                        """))
+
+            print("\n📋 Index details:")
+            current_index = None
+            columns = []
+
+            for row in detailed_result:
+                if current_index != row.index_name:
+                    if current_index is not None:
+                        print(f"  - {current_index}: ({', '.join(columns)})")
+                    current_index = row.index_name
+                    columns = [row.column_name]
+                else:
+                    columns.append(row.column_name)
+
+            # Print the last index
+            if current_index is not None:
+                print(f"  - {current_index}: ({', '.join(columns)})")
+
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            db.session.rollback()
 
 
 def get_season(month):
@@ -1017,8 +1110,7 @@ def new_chemical():
                     bill.liquid_alum_range_to = new_chemical_ref.liquid_alum_range_to
                     bill.solid_alum_range_from = new_chemical_ref.solid_alum_range_from
                     bill.solid_alum_range_to = new_chemical_ref.solid_alum_range_to
-
-            db.session.commit()
+                db.session.commit()
             response = {
                 "response": {
                     "success": "تم إدخال القيم المرجعية بنجاح"
@@ -2146,4 +2238,5 @@ def delete_group_permission(group_id, permission_id):
 
 
 if __name__ == '__main__':
+    # create_indexes_mssql()
     app.run(host='0.0.0.0', port=5000, debug=True)
