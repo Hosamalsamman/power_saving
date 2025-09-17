@@ -1,6 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase, relationship
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Float, ForeignKey, NVARCHAR, Numeric, DECIMAL
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Float, ForeignKey, NVARCHAR, Numeric, DECIMAL, \
+    Index
 from flask_login import UserMixin
 
 
@@ -25,6 +26,7 @@ class Technology(db.Model):
     technology_id = db.Column(Integer, primary_key=True)
     technology_name = db.Column(NVARCHAR(200), unique=True, nullable=False)
     power_per_water = db.Column(Float, nullable=False)
+    technology_main_type = db.Column(NVARCHAR(20), nullable=False)
 
     station_techs = db.relationship('StationGaugeTechnology', back_populates='technology')
     technology_bills = db.relationship('TechnologyBill', back_populates='technology')
@@ -238,6 +240,17 @@ class TechnologyBill(db.Model):
             max_id = db.session.query(db.func.max(TechnologyBill.tech_bill_id)).scalar()
             self.tech_bill_id = (max_id or 0) + 1
 
+    # Add indexes
+    __table_args__ = (
+        Index('idx_bill_year_month', 'bill_year', 'bill_month'),
+        Index('idx_technology_id', 'technology_id'),
+        Index('idx_bill_year', 'bill_year'),
+        # Index for technology + year + month queries
+        Index('idx_tech_year_month', 'technology_id', 'bill_year', 'bill_month'),
+        # Index for station + year + month queries
+        Index('idx_station_year_month', 'station_id', 'bill_year', 'bill_month'),
+    )
+
 
 class AlumChlorineReference(db.Model):
     __tablename__ = 'alum_chlorine_reference'
@@ -317,11 +330,15 @@ class User(UserMixin, db.Model):
     emp_code = db.Column(NVARCHAR(8), primary_key=True)
     emp_name = db.Column(NVARCHAR(400), unique=True, nullable=False)
     username = db.Column(NVARCHAR(30), unique=True)
-    userpassword = db.Column(NVARCHAR(30), nullable=False)
+    userpassword = db.Column(NVARCHAR(300), nullable=False)
     group_id = db.Column(Integer, db.ForeignKey('groups.group_id'))
     is_active = db.Column(Boolean, nullable=False)
 
     group = db.relationship('Group', back_populates='users')
+
+    # Optional if you don’t want to rename your PK
+    def get_id(self):
+        return str(self.emp_code)  # must return a string
 
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}

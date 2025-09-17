@@ -1,12 +1,12 @@
 import os
 from decimal import Decimal
 
-from flask import Flask, jsonify, render_template, request
-from sqlalchemy import and_, or_
+from flask import Flask, abort, jsonify, render_template, request
+from sqlalchemy import and_, or_, not_, func, case
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, DataError
 from flask_cors import CORS
 from models import *
-from flask_login import login_user, LoginManager, current_user, logout_user
+from flask_login import login_user, LoginManager, current_user, logout_user, login_required
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
@@ -24,6 +24,7 @@ from bidi.algorithm import get_display
 import seaborn as sns
 from sklearn.linear_model import LinearRegression
 import pyodbc
+from flask_migrate import Migrate  # Add this import
 
 # import secrets
 #
@@ -65,8 +66,23 @@ db.init_app(app)
 with app.app_context():
     db.create_all()
 
+# Add this line to enable migrations
+migrate = Migrate(app, db)
 
 # Create my own decorators and functions
+def private_route(allowed_groups):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if current_user.group_id not in allowed_groups:
+                return abort(403)
+            return f(*args, **kwargs)
+
+        return decorated_function
+
+    return decorator
+
+
 def get_season(month):
     if month in range(4, 11):  # 11 is exclusive, so covers 4 to 10
         return "summer"
@@ -77,52 +93,111 @@ def get_season(month):
 @app.route("/")
 def home():
     current_year = datetime.now().year
-    current_year_tech_bills = db.session.query(TechnologyBill).filter(
-        TechnologyBill.bill_year == current_year
-    ).all()
-    if current_year_tech_bills:
-        bills_list = [row.to_dict() for row in current_year_tech_bills]
-        df_bills = pd.DataFrame(bills_list)
-        df_bills.fillna(0, inplace=True)
-        df_bills.infer_objects(copy=False)
-        # Show all columns
-        pd.set_option('display.max_columns', None)
-        df_bills.technology_bill_total = pd.to_numeric(df_bills.technology_bill_total)
-        totals = {
-            "power": float(df_bills['technology_power_consump'].sum()),
-            "water": float(df_bills['technology_water_amount'].sum()),
-            "money": float(df_bills['technology_bill_total'].sum()),
-            "chlorine": float(df_bills['technology_chlorine_consump'].sum()),
-            "solid_alum": float(df_bills['technology_solid_alum_consump'].sum()),
-            "liquid_alum": float(df_bills['technology_liquid_alum_consump'].sum())
-        }
+    totals_per_type = (
+        db.session.query(
+            func.sum(TechnologyBill.technology_power_consump).label("power"),
+            func.sum(TechnologyBill.technology_bill_total).label("money"),
+            func.sum(TechnologyBill.technology_chlorine_consump).label("chlorine"),
+            func.sum(TechnologyBill.technology_solid_alum_consump).label("solid_alum"),
+            func.sum(TechnologyBill.technology_liquid_alum_consump).label("liquid_alum"),
+            func.sum(
+                case(
+                    (Station.station_type == "مياة", TechnologyBill.technology_water_amount),
+                    else_=0
+                )
+            ).label("water"),
+
+            func.sum(
+                case(
+                    (Station.station_type == "صرف", TechnologyBill.technology_water_amount),
+                    else_=0
+                )
+            ).label("sanitation"),
+        )
+        .join(TechnologyBill.station)
+        .filter(TechnologyBill.bill_year == current_year)
+        .filter(TechnologyBill.technology_bill_percentage.isnot(None))
+        .one()
+    )
+
+    totals = {
+        "power": float(totals_per_type.power or 0),
+        "money": float(totals_per_type.money or 0),
+        "chlorine": float(totals_per_type.chlorine or 0),
+        "solid_alum": float(totals_per_type.solid_alum or 0),
+        "liquid_alum": float(totals_per_type.liquid_alum or 0),
+        "water": float(totals_per_type.water or 0),
+        "sanitation": float(totals_per_type.sanitation or 0),
+    }
+
+    if totals['power']:
         current_month = datetime.now().month - 1
         if current_month == 0:
             current_month = 12
             current_year -= 1
         current_month_bills = db.session.query(TechnologyBill).filter(
-            TechnologyBill.bill_month == current_month, TechnologyBill.bill_year == current_year).all()
+            TechnologyBill.bill_month == current_month,
+            TechnologyBill.bill_year == current_year).all()
         over_power_consump = []
         over_chlorine_consump = []
         over_solid_alum_consump = []
         over_liquid_alum_consump = []
         for bill in current_month_bills:
             if bill.power_per_water:
-                if bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water:
+                if bill.technology_bill_percentage and (
+                        bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water):
                     over_power_consump.append(bill.to_dict())
-                if (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (
-                        bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from:
+                if bill.chlorine_range_to and (
+                        (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (
+                        bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from):
                     over_chlorine_consump.append(bill.to_dict())
-                if (bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (
-                        bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from:
+                if bill.solid_alum_range_to and ((
+                                                         bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (
+                                                         bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from):
                     over_solid_alum_consump.append(bill.to_dict())
-                if (bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
-                        bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from:
+                if bill.liquid_alum_range_to and ((
+                                                          bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
+                                                          bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from):
                     over_liquid_alum_consump.append(bill.to_dict())
+        # query with group by station to compare with water capacity
+        query = (
+            db.session.query(
+                TechnologyBill.station_id,
+                TechnologyBill.bill_year,
+                TechnologyBill.bill_month,
+                func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                Station.station_name,
+                Station.station_water_capacity,
+            )
+            .join(TechnologyBill.station)
+            .filter(TechnologyBill.bill_year == current_year)
+            .filter(TechnologyBill.bill_month == current_month)
+            .filter(TechnologyBill.technology_water_amount.isnot(None))
+            .group_by(
+                TechnologyBill.station_id,
+                TechnologyBill.bill_year,
+                TechnologyBill.bill_month,
+                Station.station_name,
+                Station.station_water_capacity,
+            )
+            .having(func.sum(TechnologyBill.technology_water_amount) > Station.station_water_capacity * 30)
+        )
+        bills = query.all()
+        over_water_bills_list = [
+            {
+                "station_name": bill.station_name,
+                "year": bill.bill_year,
+                "month": bill.bill_month,
+                "total_water": float(bill.total_water) if bill.total_water else 0,
+                "water_capacity": bill.station_water_capacity,
+                "capacity_limit": bill.station_water_capacity * 30
+            } for bill in bills
+        ]
 
         return jsonify(
             power=totals['power'],
             water=totals['water'],
+            sanitation=totals['sanitation'],
             money=totals['money'],
             chlorine=totals['chlorine'],
             solid_alum=totals['solid_alum'],
@@ -130,7 +205,8 @@ def home():
             over_power_consump=over_power_consump,
             over_chlorine_consump=over_chlorine_consump,
             over_solid_alum_consump=over_solid_alum_consump,
-            over_liquid_alum_consump=over_liquid_alum_consump
+            over_liquid_alum_consump=over_liquid_alum_consump,
+            over_water_stations=over_water_bills_list
         )
 
     return jsonify({"message": "برجاء تسجيل الفواتير لمتابعة الاستهلاكات السنوية"})
@@ -244,6 +320,7 @@ def edit_tech(tech_id):
         data = request.get_json()
         tech.technology_name = data['technology_name']
         tech.power_per_water = data['power_per_water']
+        tech.technology_main_type = data['technology_main_type']
 
         try:
             db.session.commit()
@@ -281,6 +358,7 @@ def add_new_tech():
         new_tech = Technology(
             technology_name=data['technology_name'],
             power_per_water=data['power_per_water'],
+            technology_main_type=data['technology_main_type']
         )
 
         db.session.add(new_tech)
@@ -496,7 +574,7 @@ def add_new_bill(account_number):
     gauge_sgts = db.session.query(StationGaugeTechnology).filter(
         and_(
             StationGaugeTechnology.account_number == account_number,
-            StationGaugeTechnology.relation_status.is_(True)
+            StationGaugeTechnology.relation_status == True
         )
     ).all()
 
@@ -655,15 +733,18 @@ def add_new_bill(account_number):
                             current_tech_bill.technology_bill_total += new_bill.bill_total  #add it any way and divide it according to water amount
                         else:
                             current_tech_bill.technology_power_consump += new_bill.power_consump * current_tech_bill.technology_bill_percentage / 100
-                            current_tech_bill.technology_bill_total += Decimal(float(new_bill.bill_total) * current_tech_bill.technology_bill_percentage / 100)
+                            current_tech_bill.technology_bill_total += Decimal(
+                                float(new_bill.bill_total) * current_tech_bill.technology_bill_percentage / 100)
                     else:
                         tech_bill = TechnologyBill(
                             station_id=gauge_sgts[i].station_id,
                             technology_id=gauge_sgts[i].technology_id,
                             bill_month=new_bill.bill_month,
                             bill_year=new_bill.bill_year,
-                            technology_power_consump=new_bill.power_consump,    #add it any way and divide it according to water amount
-                            technology_bill_total=new_bill.bill_total           #add it any way and divide it according to water amount
+                            technology_power_consump=new_bill.power_consump,
+                            #add it any way and divide it according to water amount
+                            technology_bill_total=new_bill.bill_total
+                            #add it any way and divide it according to water amount
                         )
                         db.session.add(tech_bill)
             db.session.commit()
@@ -680,14 +761,7 @@ def add_new_bill(account_number):
 def show_null_tech_bills():
     # Comprehensive check for various "empty" values
     all_tech_bills = db.session.query(TechnologyBill).filter(
-        or_(
-            TechnologyBill.technology_water_amount.is_(None),  # NULL
-            TechnologyBill.technology_water_amount == '',  # Empty string
-            TechnologyBill.technology_water_amount == 'NULL',  # String "NULL"
-            TechnologyBill.technology_water_amount == 'null',  # String "null"
-            TechnologyBill.technology_water_amount == '0',  # String "0"
-            TechnologyBill.technology_water_amount == 0  # Integer 0
-        )
+        TechnologyBill.technology_water_amount == None
     ).all()
     tech_bills_list = [t_b.to_dict() for t_b in all_tech_bills]
     print(tech_bills_list)
@@ -698,8 +772,8 @@ def show_null_tech_bills():
 def edit_tech_bill(tech_bill_id):
     bill = db.session.query(TechnologyBill).filter(TechnologyBill.tech_bill_id == tech_bill_id).first()
     # make old rows uneditable
-    if bill.technology_bill_percentage:
-        return jsonify({"response": "لا يمكن تعديل البيانات التاريخية للنظام"}), 400
+    # if bill.technology_bill_percentage:
+    #     return jsonify({"response": "لا يمكن تعديل البيانات التاريخية للنظام"}), 420
 
     if request.method == "POST":
         data = request.get_json()
@@ -759,9 +833,14 @@ def edit_tech_bill(tech_bill_id):
             # apply for power and bill
             if should_calculate:
                 for each_bill in related_bills:
-                    each_bill.technology_bill_percentage = float(Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * 100)
-                    each_bill.technology_power_consump = float(Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * Decimal(str(each_bill.technology_power_consump)))
-                    each_bill.technology_bill_total = float(Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * Decimal(str(each_bill.technology_bill_total)))
+                    each_bill.technology_bill_percentage = float(
+                        Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * 100)
+                    each_bill.technology_power_consump = float(
+                        Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * Decimal(
+                            str(each_bill.technology_power_consump)))
+                    each_bill.technology_bill_total = float(
+                        Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * Decimal(
+                            str(each_bill.technology_bill_total)))
 
         try:
             db.session.commit()
@@ -920,6 +999,31 @@ def new_chemical():
             db.session.rollback()
             return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
         else:
+            # search for related tech bills with None reference values
+            if new_chemical_ref.season == "summer":
+                bills = db.session.query(TechnologyBill).filter(
+                    TechnologyBill.bill_month.between(4, 10),
+                    TechnologyBill.technology_id == new_chemical_ref.technology_id,
+                    TechnologyBill.station.has(Station.water_source_id == new_chemical_ref.water_source_id),
+                    TechnologyBill.chlorine_range_from == None,
+                ).all()
+            else:
+                bills = db.session.query(TechnologyBill).filter(
+                    not_(TechnologyBill.bill_month.between(4, 10)),
+                    TechnologyBill.technology_id == new_chemical_ref.technology_id,
+                    TechnologyBill.station.has(Station.water_source_id == new_chemical_ref.water_source_id),
+                    TechnologyBill.chlorine_range_from == None,
+                ).all()
+            # set corresponding ref. values
+            if bills:
+                for bill in bills:
+                    bill.chlorine_range_from = new_chemical_ref.chlorine_range_from
+                    bill.chlorine_range_to = new_chemical_ref.chlorine_range_to
+                    bill.liquid_alum_range_from = new_chemical_ref.liquid_alum_range_from
+                    bill.liquid_alum_range_to = new_chemical_ref.liquid_alum_range_to
+                    bill.solid_alum_range_from = new_chemical_ref.solid_alum_range_from
+                    bill.solid_alum_range_to = new_chemical_ref.solid_alum_range_to
+                db.session.commit()
             response = {
                 "response": {
                     "success": "تم إدخال القيم المرجعية بنجاح"
@@ -1316,7 +1420,7 @@ def new_annual_bill(meter_id):
                 return jsonify({"error": f"{calculated_annual_bill}الإجمالي غير مطابق للبنود المدخلة "}), 406
         else:
             return jsonify({
-                               "error": f"{calculated_total_consump}قيمة الاستهلاك الكلي لا يساوي مجموع الفواتير المسجلة لدينا "}), 405
+                "error": f"{calculated_total_consump}قيمة الاستهلاك الكلي لا يساوي مجموع الفواتير المسجلة لدينا "}), 405
     return jsonify({"response": "لا إله إلا الله وحده لا شريك له له الملك وله الحمد وهو على كل شيء قدير"})
 
 
@@ -1324,7 +1428,7 @@ def new_annual_bill(meter_id):
 def predict(station_id):
     station_bills = db.session.query(TechnologyBill).filter(
         TechnologyBill.station_id == station_id,
-        TechnologyBill.technology_water_amount is not None
+        TechnologyBill.technology_water_amount != None
     ).all()
     if not station_bills:
         return jsonify({"error": "لا يوجد بيانات لهذه المحطة"}), 410
@@ -1332,7 +1436,7 @@ def predict(station_id):
 
     df_bills = pd.DataFrame(bills_list)
     df_year_bills = df_bills.groupby(['station_id', 'bill_year'], as_index=False).agg(
-        {'technology_water_amount': pd.Series.sum}
+        {'technology_water_amount': pd.Series.mean}
     )
     print(df_year_bills)
     plt.figure(figsize=(8, 4), dpi=200)
@@ -1375,7 +1479,7 @@ def predict(station_id):
     # R-squared
     points_represented = regression.score(X, y)
 
-    max_water_amount = station_bills[0].station.station_water_capacity
+    max_water_amount = station_bills[0].station.station_water_capacity * 30
     expected_year = (max_water_amount - regression.intercept_[0]) / regression.coef_[0, 0]
     result = {
         "prediction_plot": prediction_base64,
@@ -1386,13 +1490,308 @@ def predict(station_id):
     return jsonify(result)
 
 
+@app.route("/reports", methods=["GET", "POST"])
+# @login_required
+def show_reports():
+    if request.method == "POST":
+        data = request.get_json()
+        # if current_user.group_id == 1 or current_user.group_id == 2:  # Administrators or Tech-office
+        if data['report_name'] == "branch_per_month":
+            # Use parentheses instead of backslashes
+            query = db.session.query(
+                Branch.branch_name,
+                TechnologyBill.bill_year,
+                TechnologyBill.bill_month,
+                func.sum(TechnologyBill.technology_bill_total).label("total_bill"),
+                func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                func.sum(TechnologyBill.technology_power_consump).label("total_power"),
+                func.sum(TechnologyBill.technology_chlorine_consump).label("total_chlorine"),
+                func.sum(TechnologyBill.technology_liquid_alum_consump).label("total_liquid_alum"),
+                func.sum(TechnologyBill.technology_solid_alum_consump).label("total_solid_alum")
+            )
+            # Complex date range across years
+            query = query.filter(
+                or_(
+                    and_(TechnologyBill.bill_year == data['start_year'],
+                         TechnologyBill.bill_month >= data['start_month']),
+                    and_(TechnologyBill.bill_year > data['start_year'],
+                         TechnologyBill.bill_year < data['end_year']),
+                    and_(TechnologyBill.bill_year == data['end_year'],
+                         TechnologyBill.bill_month <= data['end_month'])
+                )
+            )
+            query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
+            query = query.join(TechnologyBill.station)
+            query = query.join(Station.branch)
+            query = query.group_by(Branch.branch_name, TechnologyBill.bill_year, TechnologyBill.bill_month)
+            bills = query.all()
+
+            bills_list = [
+                {
+                    "branch_name": bill.branch_name,
+                    "year": bill.bill_year,
+                    "month": bill.bill_month,
+                    "total_bill": float(bill.total_bill) if bill.total_bill else 0,
+                    "total_water": float(bill.total_water) if bill.total_water else 0,
+                    "total_power": float(bill.total_power) if bill.total_power else 0,
+                    "total_chlorine": float(bill.total_chlorine) if bill.total_chlorine else 0,
+                    "total_liquid_alum": float(bill.total_liquid_alum) if bill.total_liquid_alum else 0,
+                    "total_solid_alum": float(bill.total_solid_alum) if bill.total_solid_alum else 0,
+
+                } for bill in bills
+            ]
+            return jsonify(bills_list)
+        elif data['report_name'] == "branch_total":
+            # Use parentheses instead of backslashes
+            query = db.session.query(
+                Branch.branch_name,
+                func.sum(TechnologyBill.technology_bill_total).label("total_bill"),
+                func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                func.sum(TechnologyBill.technology_power_consump).label("total_power"),
+                func.sum(TechnologyBill.technology_chlorine_consump).label("total_chlorine"),
+                func.sum(TechnologyBill.technology_liquid_alum_consump).label("total_liquid_alum"),
+                func.sum(TechnologyBill.technology_solid_alum_consump).label("total_solid_alum")
+            )
+            # Complex date range across years
+            query = query.filter(
+                or_(
+                    and_(TechnologyBill.bill_year == data['start_year'],
+                         TechnologyBill.bill_month >= data['start_month']),
+                    and_(TechnologyBill.bill_year > data['start_year'],
+                         TechnologyBill.bill_year < data['end_year']),
+                    and_(TechnologyBill.bill_year == data['end_year'],
+                         TechnologyBill.bill_month <= data['end_month'])
+                )
+            )
+            query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
+            query = query.join(TechnologyBill.station)
+            query = query.join(Station.branch)
+            query = query.group_by(Branch.branch_name)
+            bills = query.all()
+
+            bills_list = [
+                {
+                    "branch_name": bill.branch_name,
+                    "total_bill": float(bill.total_bill) if bill.total_bill else 0,
+                    "total_water": float(bill.total_water) if bill.total_water else 0,
+                    "total_power": float(bill.total_power) if bill.total_power else 0,
+                    "total_chlorine": float(bill.total_chlorine) if bill.total_chlorine else 0,
+                    "total_liquid_alum": float(bill.total_liquid_alum) if bill.total_liquid_alum else 0,
+                    "total_solid_alum": float(bill.total_solid_alum) if bill.total_solid_alum else 0,
+
+                } for bill in bills
+            ]
+            return jsonify(bills_list)
+        elif data['report_name'] == "technology_per_month":
+            query = db.session.query(
+                TechnologyBill.technology_id,
+                Technology.technology_name,
+                TechnologyBill.bill_year,
+                TechnologyBill.bill_month,
+                func.sum(TechnologyBill.technology_bill_total).label("total_bill"),
+                func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                func.sum(TechnologyBill.technology_power_consump).label("total_power"),
+                func.sum(TechnologyBill.technology_chlorine_consump).label("total_chlorine"),
+                func.sum(TechnologyBill.technology_liquid_alum_consump).label("total_liquid_alum"),
+                func.sum(TechnologyBill.technology_solid_alum_consump).label("total_solid_alum")
+            )
+            query = query.join(TechnologyBill.technology)
+            # Complex date range across years
+            query = query.filter(
+                or_(
+                    and_(TechnologyBill.bill_year == data['start_year'],
+                         TechnologyBill.bill_month >= data['start_month']),
+                    and_(TechnologyBill.bill_year > data['start_year'],
+                         TechnologyBill.bill_year < data['end_year']),
+                    and_(TechnologyBill.bill_year == data['end_year'],
+                         TechnologyBill.bill_month <= data['end_month'])
+                )
+            )
+            query = query.filter(TechnologyBill.technology_bill_percent.isnot(None))
+            query = query.group_by(TechnologyBill.technology_id, TechnologyBill.bill_year,
+                                   TechnologyBill.bill_month, Technology.technology_name)
+            bills = query.all()
+            bills_list = [
+                {
+                    "technology_name": bill.technology_name,
+                    "year": bill.bill_year,
+                    "month": bill.bill_month,
+                    "total_bill": float(bill.total_bill) if bill.total_bill else 0,
+                    "total_water": float(bill.total_water) if bill.total_water else 0,
+                    "total_power": float(bill.total_power) if bill.total_power else 0,
+                    "total_chlorine": float(bill.total_chlorine) if bill.total_chlorine else 0,
+                    "total_liquid_alum": float(bill.total_liquid_alum) if bill.total_liquid_alum else 0,
+                    "total_solid_alum": float(bill.total_solid_alum) if bill.total_solid_alum else 0,
+                } for bill in bills
+            ]
+            return jsonify(bills_list)
+        elif data['report_name'] == "technology_total":
+            query = db.session.query(
+                TechnologyBill.technology_id,
+                Technology.technology_name,
+                func.sum(TechnologyBill.technology_bill_total).label("total_bill"),
+                func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                func.sum(TechnologyBill.technology_power_consump).label("total_power"),
+                func.sum(TechnologyBill.technology_chlorine_consump).label("total_chlorine"),
+                func.sum(TechnologyBill.technology_liquid_alum_consump).label("total_liquid_alum"),
+                func.sum(TechnologyBill.technology_solid_alum_consump).label("total_solid_alum")
+            )
+            query = query.join(TechnologyBill.technology)
+            # Complex date range across years
+            query = query.filter(
+                or_(
+                    and_(TechnologyBill.bill_year == data['start_year'],
+                         TechnologyBill.bill_month >= data['start_month']),
+                    and_(TechnologyBill.bill_year > data['start_year'],
+                         TechnologyBill.bill_year < data['end_year']),
+                    and_(TechnologyBill.bill_year == data['end_year'],
+                         TechnologyBill.bill_month <= data['end_month'])
+                )
+            )
+            query = query.filter(TechnologyBill.technology_bill_percent.isnot(None))
+            query = query.group_by(TechnologyBill.technology_id, Technology.technology_name)
+            bills = query.all()
+            bills_list = [
+                {
+                    "technology_name": bill.technology_name,
+                    "total_bill": float(bill.total_bill) if bill.total_bill else 0,
+                    "total_water": float(bill.total_water) if bill.total_water else 0,
+                    "total_power": float(bill.total_power) if bill.total_power else 0,
+                    "total_chlorine": float(bill.total_chlorine) if bill.total_chlorine else 0,
+                    "total_liquid_alum": float(bill.total_liquid_alum) if bill.total_liquid_alum else 0,
+                    "total_solid_alum": float(bill.total_solid_alum) if bill.total_solid_alum else 0,
+                } for bill in bills
+            ]
+            return jsonify(bills_list)
+
+        # elif current_user.group_id == 1 or current_user.group_id == 3:  # Administrators or Power-saving
+        elif data['report_name'] == "station-bills":
+            query = (
+                db.session.query(
+                    TechnologyBill.station_id,
+                    TechnologyBill.bill_year,
+                    TechnologyBill.bill_month,
+                    func.sum(TechnologyBill.technology_bill_total).label("total_bill"),
+                    Station.station_name,
+                )
+                .join(TechnologyBill.station)
+                .filter(
+                    or_(
+                        and_(TechnologyBill.bill_year == data['start_year'],
+                             TechnologyBill.bill_month >= data['start_month']),
+                        and_(TechnologyBill.bill_year > data['start_year'],
+                             TechnologyBill.bill_year < data['end_year']),
+                        and_(TechnologyBill.bill_year == data['end_year'],
+                             TechnologyBill.bill_month <= data['end_month'])
+                    )
+                )
+                .filter(TechnologyBill.technology_bill_percentage.isnot(None))
+                .group_by(
+                    TechnologyBill.station_id,
+                    TechnologyBill.bill_year,
+                    TechnologyBill.bill_month,
+                    Station.station_name,
+                )
+            )
+            bills = query.all()
+            station_bills_list = [
+                {
+                    "station_name": bill.station_name,
+                    "year": bill.bill_year,
+                    "month": bill.bill_month,
+                    "total_bill": float(bill.total_bill) if bill.total_bill else 0,
+                } for bill in bills
+            ]
+            return jsonify(station_bills_list)
+        elif data['report_name'] == "water-techs-3-month":
+            query = (
+                db.session.query(
+                    Technology.technology_main_type,
+                    func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                    func.sum(TechnologyBill.technology_power_consump).label("total_power"),
+                    func.sum(TechnologyBill.technology_bill_total).label("total_bill")
+                )
+                .join(TechnologyBill.technology)
+                .join(TechnologyBill.station)  # Needed for Station filtering
+                .filter(
+                    or_(
+                        and_(TechnologyBill.bill_year == data['start_year'],
+                             TechnologyBill.bill_month >= data['start_month']),
+                        and_(TechnologyBill.bill_year > data['start_year'],
+                             TechnologyBill.bill_year < data['end_year']),
+                        and_(TechnologyBill.bill_year == data['end_year'],
+                             TechnologyBill.bill_month <= data['end_month'])
+                    )
+                )
+                .filter(TechnologyBill.technology_bill_percentage.isnot(None))
+                .filter(Station.station_type == "مياة")  # Filter by station type
+                .group_by(Technology.technology_main_type)  # ✅ Only group by main type
+            )
+
+            bills = query.all()
+
+            station_bills_list = [
+                {
+                    "technology_main_type": bill.technology_main_type,
+                    "total_water": float(bill.total_water) if bill.total_water else 0,
+                    "total_power": float(bill.total_power) if bill.total_power else 0,
+                    "total_bill": float(bill.total_bill) if bill.total_bill else 0,
+                    "percent": float(bill.total_bill) / float(bill.total_power) if bill.total_power else 0,
+                } for bill in bills
+            ]
+
+            return jsonify(station_bills_list)
+
+        elif data['report_name'] == "sanity-techs-3-month":
+            query = (
+                db.session.query(
+                    Technology.technology_main_type,
+                    func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                    func.sum(TechnologyBill.technology_power_consump).label("total_power"),
+                    func.sum(TechnologyBill.technology_bill_total).label("total_bill")
+                )
+                .join(TechnologyBill.technology)
+                .join(TechnologyBill.station)  # Needed for Station filtering
+                .filter(
+                    or_(
+                        and_(TechnologyBill.bill_year == data['start_year'],
+                             TechnologyBill.bill_month >= data['start_month']),
+                        and_(TechnologyBill.bill_year > data['start_year'],
+                             TechnologyBill.bill_year < data['end_year']),
+                        and_(TechnologyBill.bill_year == data['end_year'],
+                             TechnologyBill.bill_month <= data['end_month'])
+                    )
+                )
+                .filter(TechnologyBill.technology_bill_percentage.isnot(None))
+                .filter(Station.station_type == "صرف")  # Filter by station type
+                .group_by(Technology.technology_main_type)  # ✅ Only group by main type
+            )
+
+            bills = query.all()
+
+            station_bills_list = [
+                {
+                    "technology_main_type": bill.technology_main_type,
+                    "total_water": float(bill.total_water) if bill.total_water else 0,
+                    "total_power": float(bill.total_power) if bill.total_power else 0,
+                    "total_bill": float(bill.total_bill) if bill.total_bill else 0,
+                    "percent": float(bill.total_bill) / float(bill.total_power) if bill.total_power else 0,
+                } for bill in bills
+            ]
+
+            return jsonify(station_bills_list)
+
+    return jsonify({"response": "سبحان الله وبحمده"})  # current_user.group.to_dict()
+
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
         data = request.get_json()
+        print(data)
         user = db.session.query(User).filter(User.username == data['username']).first()
         if user:
-            return jsonify({"response": "يوجد حساب بهذا الاسم، جرب تسجيل الدخول بدلا من إنشاء حساب جديد"}), 401
+            return jsonify({"error": "يوجد حساب بهذا الاسم، جرب تسجيل الدخول بدلا من إنشاء حساب جديد"}), 401
         hash_and_salted_password = generate_password_hash(
             data['password'],
             method='pbkdf2:sha256',
@@ -1401,7 +1800,7 @@ def register():
         new_user = User(
             emp_code=data['emp_code'],
             emp_name=data['emp_name'],
-            username=data['username'],
+            username=data['username'].lower(),
             userpassword=hash_and_salted_password,
             is_active=False
         )
@@ -1409,6 +1808,7 @@ def register():
         try:
             db.session.commit()
         except IntegrityError as e:
+            print(e)
             db.session.rollback()
             return jsonify(
                 {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
@@ -1483,15 +1883,15 @@ def login():
         data = request.get_json()
         user = db.session.query(User).filter(User.username == data['username']).first()
 
-        if not user or not check_password_hash(user.password, data['password']):
-            return jsonify({"response": "اسم مستخدم أو كلمة مرور خاطئة"}), 401
+        if not user or not check_password_hash(user.userpassword, data['password']):
+            return jsonify({"error": "اسم مستخدم أو كلمة مرور خاطئة"}), 401
         else:
             if user.is_active:
                 login_user(user)
                 return jsonify(current_user=current_user.to_dict()), 200
             else:
                 return jsonify({
-                    "response": "هذا الحساب غير مفعل، برجاء مراجعة الادارة العامة لتكنولوجيا المعلومات لتفعيل حسابك"}), 401
+                    "error": "هذا الحساب غير مفعل، برجاء مراجعة الادارة العامة لتكنولوجيا المعلومات لتفعيل حسابك"}), 410
     return jsonify({"response": "لا إله إلا الله"})
 
 
