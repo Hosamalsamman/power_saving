@@ -493,8 +493,9 @@ def gauges():
     return jsonify(gauges_list)
 
 
-@app.route("/edit-gauge/<account_number>", methods=["GET", "POST"])
-def edit_gauge(account_number):
+@app.route("/edit-gauge", methods=["GET", "POST"])
+def edit_gauge():
+    account_number = request.args.get('account_number')
     gauge = db.session.get(Gauge, account_number)
 
     if request.method == "POST":
@@ -662,8 +663,9 @@ def cancel_relation(relation_id):
         return jsonify(response), 200
 
 
-@app.route("/new-bill/<account_number>", methods=["GET", "POST"])
-def add_new_bill(account_number):
+@app.route("/new-bill", methods=["GET", "POST"])
+def add_new_bill():
+    account_number = request.args.get('account_number')
     # show_percent = False
     gauge_sgts = db.session.query(StationGaugeTechnology).filter(
         and_(
