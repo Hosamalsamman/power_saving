@@ -1,7 +1,7 @@
 import os
 from decimal import Decimal
 
-from flask import Flask, abort, jsonify, render_template, request
+from flask import Flask, abort, jsonify, render_template, request, make_response
 from sqlalchemy import and_, or_, not_, func, case
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, DataError
 from flask_cors import CORS
@@ -495,11 +495,9 @@ def gauges():
 
 @app.route("/edit-gauge", methods=["GET", "POST"])
 def edit_gauge():
-    account_number = request.args.get('account_number')
-    gauge = db.session.get(Gauge, account_number)
-
     if request.method == "POST":
         data = request.get_json()
+        gauge = db.session.get(Gauge, data['account_number'])
         print(data)
         gauge.meter_id = data['meter_id']
         gauge.meter_factor = data['meter_factor']
@@ -529,7 +527,7 @@ def edit_gauge():
                     "success": "تم تعديل بيانات العداد بنجاح"
                 }
             }), 200
-    return jsonify({"response": "سبحان الله"})
+    return jsonify({"response": "لا اله الا الله"})
 
 
 @app.route("/new-gauge", methods=["GET", "POST"])
@@ -663,9 +661,9 @@ def cancel_relation(relation_id):
         return jsonify(response), 200
 
 
-@app.route("/new-bill", methods=["GET", "POST"])
-def add_new_bill():
-    account_number = request.args.get('account_number')
+@app.route("/new-bill/<path:account_number>", methods=["GET", "POST"])
+def add_new_bill(account_number):
+    print(account_number)
     # show_percent = False
     gauge_sgts = db.session.query(StationGaugeTechnology).filter(
         and_(
