@@ -1740,7 +1740,7 @@ def show_reports():
                          TechnologyBill.bill_month <= datetime.strptime(data['to_date'], "%Y-%m-%d").month)
                 )
             )
-            query = query.filter(TechnologyBill.technology_bill_percent.isnot(None))
+            query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
             query = query.group_by(TechnologyBill.technology_id, Technology.technology_name)
             bills = query.all()
             bills_list = [
@@ -1754,6 +1754,7 @@ def show_reports():
                     "total_solid_alum": float(bill.total_solid_alum) if bill.total_solid_alum else 0,
                 } for bill in bills
             ]
+            print(bills_list)
             return jsonify(bills_list)
 
         # elif current_user.group_id == 1 or current_user.group_id == 3:  # Administrators or Power-saving
