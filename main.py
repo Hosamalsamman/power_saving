@@ -6,7 +6,8 @@ from sqlalchemy import and_, or_, not_, func, case
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, DataError
 from flask_cors import CORS
 from models import *
-from flask_login import login_user, LoginManager, current_user, logout_user, login_required
+# from flask_login import login_user, LoginManager, current_user, logout_user
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
@@ -48,16 +49,17 @@ load_dotenv()
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv("FLASK_KEY")
 CORS(app)
-CORS(app, origins=["http://localhost:5000"])
+CORS(app, supports_credentials=True, origins=["http://localhost:5000"])
 
-# Configure Flask-Login
-login_manager = LoginManager()
-login_manager.init_app(app)
-
-
-@login_manager.user_loader
-def load_user(emp_code):
-    return db.get_or_404(User, emp_code)
+# # Configure Flask-Login
+# login_manager = LoginManager()
+# login_manager.init_app(app)
+#
+#
+# @login_manager.user_loader
+# def load_user(emp_code):
+#     print("Loading user", emp_code)
+#     return db.get_or_404(User, emp_code)
 
 
 # Connect to Database
@@ -71,16 +73,49 @@ with app.app_context():
 migrate = Migrate(app, db)
 
 # Create my own decorators and functions
+# Initialize JWT
+app.config['JWT_SECRET_KEY'] = os.getenv("FLASK_KEY")
+jwt = JWTManager(app)
 
 def private_route(allowed_groups):
     def decorator(f):
         @wraps(f)
+        @jwt_required()  # Verify JWT token
         def decorated_function(*args, **kwargs):
-            if current_user.group_id not in allowed_groups:
-                return abort(403)
+            # Get user identity from JWT token
+            current_user_id = get_jwt_identity()
+
+            # Load user from database
+            user = db.session.get(User, current_user_id)
+
+            if not user:
+                return jsonify({'error': 'User not found'}), 403
+
+            # Check if user's group is allowed
+            if user.group_id not in allowed_groups:
+                return jsonify({'error': 'Access forbidden', 'required_groups': allowed_groups}), 403
+
+            # Pass user to the route function (optional but useful)
+            kwargs['current_user'] = user   # pass current_user as input to func to access the object
+
             return f(*args, **kwargs)
+
         return decorated_function
+
     return decorator
+
+
+# def private_route(allowed_groups):
+#     def decorator(f):
+#         @wraps(f)
+#         def decorated_function(args, **kwargs):
+#             if not current_user.is_authenticated:
+#                 return abort(401)
+#             elif current_user.group_id not in allowed_groups:
+#                 return abort(403)
+#             return f(args, **kwargs)
+#         return decorated_function
+#     return decorator
 
 
 def create_indexes_mssql():
@@ -304,13 +339,16 @@ def home():
 
 
 @app.route("/stations")
+@private_route([1, 2, 3])
 def stations():
+    # print(current_user.emp_code) pass current_user as input to func to access the object
     all_stations = db.session.query(Station).all()
     stations_list = [station.to_dict() for station in all_stations]
     return jsonify(stations_list)
 
 
 @app.route("/edit-station/<station_id>", methods=["GET", "POST"])
+@private_route([1, 2])
 def edit_station(station_id):
     station = db.session.get(Station, station_id)
 
@@ -352,6 +390,7 @@ def edit_station(station_id):
 
 
 @app.route("/new-station", methods=["GET", "POST"])
+@private_route([1, 2])
 def add_new_station():
     branches = db.session.query(Branch).all()
     branches_list = [branch.to_dict() for branch in branches]
@@ -399,6 +438,7 @@ def add_new_station():
 
 
 @app.route("/technologies")
+@private_route([1, 2, 3])
 def technologies():
     all_techs = db.session.query(Technology).all()
     techs_list = [tech.to_dict() for tech in all_techs]
@@ -406,6 +446,7 @@ def technologies():
 
 
 @app.route("/edit-tech/<tech_id>", methods=["GET", "POST"])
+@private_route([1, 2, 3])
 def edit_tech(tech_id):
     tech = db.session.get(Technology, tech_id)
     if request.method == "POST":
@@ -444,6 +485,7 @@ def edit_tech(tech_id):
 
 
 @app.route("/new-tech", methods=["GET", "POST"])
+@private_route([1, 2, 3])
 def add_new_tech():
     if request.method == "POST":
         data = request.get_json()
@@ -486,6 +528,7 @@ def add_new_tech():
 
 
 @app.route("/gauges")
+@private_route([1, 3])
 def gauges():
     all_gauges = db.session.query(Gauge).all()
     gauges_list = [gauge.to_dict() for gauge in all_gauges]
@@ -494,6 +537,7 @@ def gauges():
 
 
 @app.route("/edit-gauge", methods=["GET", "POST"])
+@private_route([1, 3])
 def edit_gauge():
     if request.method == "POST":
         data = request.get_json()
@@ -531,6 +575,7 @@ def edit_gauge():
 
 
 @app.route("/new-gauge", methods=["GET", "POST"])
+@private_route([1, 3])
 def add_new_gauge():
     voltage_types = db.session.query(Voltage).all()
     v_t_list = [v_t.to_dict() for v_t in voltage_types]
@@ -576,6 +621,7 @@ def add_new_gauge():
 
 
 @app.route("/stg-relations")
+@private_route([1, 3])
 def stg_relations():
     all_stgs = db.session.query(StationGaugeTechnology).all()
     stgs_list = [stg.to_dict() for stg in all_stgs]
@@ -584,6 +630,7 @@ def stg_relations():
 
 
 @app.route("/new-relation", methods=["GET", "POST"])
+@private_route([1, 3])
 def add_new_stg():
     all_stations = db.session.query(Station).all()
     stations_list = [station.to_dict() for station in all_stations]
@@ -633,6 +680,7 @@ def add_new_stg():
 
 
 @app.route("/edit-relation/<relation_id>", methods=["GET", "POST"])
+@private_route([1, 3])
 def cancel_relation(relation_id):
     current_relation = db.session.query(StationGaugeTechnology).filter(
         StationGaugeTechnology.station_guage_technology_id == relation_id).first()
@@ -662,6 +710,7 @@ def cancel_relation(relation_id):
 
 
 @app.route("/new-bill/<path:account_number>", methods=["GET", "POST"])
+@private_route([1, 3])
 def add_new_bill(account_number):
     print(account_number)
     # show_percent = False
@@ -850,6 +899,7 @@ def add_new_bill(account_number):
 
 
 @app.route("/tech-bills")
+@private_route([1, 2])
 def show_null_tech_bills():
     # Comprehensive check for various "empty" values
     all_tech_bills = db.session.query(TechnologyBill).filter(
@@ -861,6 +911,7 @@ def show_null_tech_bills():
 
 
 @app.route("/edit-tech-bill/<tech_bill_id>", methods=["GET", "POST"])
+@private_route([1, 2])
 def edit_tech_bill(tech_bill_id):
     bill = db.session.query(TechnologyBill).filter(TechnologyBill.tech_bill_id == tech_bill_id).first()
     # make old rows uneditable
@@ -957,6 +1008,7 @@ def edit_tech_bill(tech_bill_id):
 
 # Add route to change voltage cost
 @app.route("/voltage-costs")
+@private_route([1, 3])
 def voltage_costs():
     all_costs = db.session.query(Voltage).all()
     costs_list = [v_c.to_dict() for v_c in all_costs]
@@ -964,6 +1016,7 @@ def voltage_costs():
 
 
 @app.route("/edit-v-cost/<voltage_id>", methods=["get", "post"])
+@private_route([1, 3])
 def edit_voltage_cost(voltage_id):
     voltage = Voltage.query.get(voltage_id)
     if request.method == "POST":
@@ -998,6 +1051,7 @@ def edit_voltage_cost(voltage_id):
 
 
 @app.route("/chemicals")
+@private_route([1, 4])
 def chemicals():
     chemicals = db.session.query(AlumChlorineReference).all()
     userschemicals_list = [chemical.to_dict() for chemical in chemicals]
@@ -1005,6 +1059,7 @@ def chemicals():
 
 
 @app.route("/edit-chemical/<chemical_id>", methods=["GET", "POST"])
+@private_route([1, 4])
 def edit_chemical(chemical_id):
     chemical = db.session.query(AlumChlorineReference).filter(AlumChlorineReference.chemical_id == chemical_id).first()
     if request.method == "POST":
@@ -1047,6 +1102,7 @@ def edit_chemical(chemical_id):
 
 
 @app.route("/new-chemical", methods=["GET", "POST"])
+@private_route([1, 4])
 def new_chemical():
     all_techs = db.session.query(Technology).all()
     techs_list = [tech.to_dict() for tech in all_techs]
@@ -1443,6 +1499,7 @@ def show_charts(station_id, tech_id):
 
 
 @app.route("/annual-bills")
+@private_route([1, 3])
 def show_annual_bills():
     bills = db.session.query(AnuualBill).all()
     bills_list = [bill.to_dict() for bill in bills]
@@ -1450,6 +1507,7 @@ def show_annual_bills():
 
 
 @app.route("/new-annual-bill/<meter_id>", methods=["GET", "POST"])
+@private_route([1, 3])
 def new_annual_bill(meter_id):
     if request.method == "POST":
         data = request.get_json()
@@ -1512,6 +1570,7 @@ def new_annual_bill(meter_id):
 
 
 @app.route("/prediction/<station_id>")
+@private_route([1, 2])
 def predict(station_id):
     station_bills = db.session.query(TechnologyBill).filter(
         TechnologyBill.station_id == station_id,
@@ -1578,7 +1637,6 @@ def predict(station_id):
 
 
 @app.route("/reports", methods=["GET", "POST"])
-# @login_required
 def show_reports():
     if request.method == "POST":
         data = request.get_json()
@@ -1795,6 +1853,7 @@ def show_reports():
                     "total_bill": float(bill.total_bill) if bill.total_bill else 0,
                 } for bill in bills
             ]
+            print(station_bills_list)
             return jsonify(station_bills_list)
         elif data['report_name'] == "water-techs-3-month":
             query = (
@@ -1823,17 +1882,17 @@ def show_reports():
 
             bills = query.all()
 
-            station_bills_list = [
+            bills_list = [
                 {
-                    "technology_main_type": bill.technology_main_type,
+                    "technology_name": bill.technology_main_type,
                     "total_water": float(bill.total_water) if bill.total_water else 0,
                     "total_power": float(bill.total_power) if bill.total_power else 0,
                     "total_bill": float(bill.total_bill) if bill.total_bill else 0,
-                    "percent": float(bill.total_bill) / float(bill.total_power) if bill.total_power else 0,
+                    "percent": "{:.2f}".format(float(bill.total_bill) / float(bill.total_power)) if bill.total_power else "0.00",
                 } for bill in bills
             ]
-
-            return jsonify(station_bills_list)
+            print(bills_list)
+            return jsonify(bills_list)
 
         elif data['report_name'] == "sanity-techs-3-month":
             query = (
@@ -1862,17 +1921,17 @@ def show_reports():
 
             bills = query.all()
 
-            station_bills_list = [
+            bills_list = [
                 {
-                    "technology_main_type": bill.technology_main_type,
+                    "technology_name": bill.technology_main_type,
                     "total_water": float(bill.total_water) if bill.total_water else 0,
                     "total_power": float(bill.total_power) if bill.total_power else 0,
                     "total_bill": float(bill.total_bill) if bill.total_bill else 0,
-                    "percent": float(bill.total_bill) / float(bill.total_power) if bill.total_power else 0,
+                    "percent": "{:.2f}".format(float(bill.total_bill) / float(bill.total_power)) if bill.total_power else "0.00",
                 } for bill in bills
             ]
-
-            return jsonify(station_bills_list)
+            print(bills_list)
+            return jsonify(bills_list)
     return jsonify({"response": "سبحان الله وبحمده"})   # current_user.group.to_dict()
 
 
@@ -1906,6 +1965,7 @@ def register():
             return jsonify(
                 {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
         except DataError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
         except SQLAlchemyError as e:
@@ -1925,6 +1985,7 @@ def register():
 
 
 @app.route("/all-users")
+@private_route([1])
 def all_users():
     users = db.session.query(User).all()
     users_list = [user.to_dict() for user in users]
@@ -1932,6 +1993,7 @@ def all_users():
 
 
 @app.route("/edit-user/<emp_code>", methods=["GET", "POST"])
+@private_route([1])
 def verify_user(emp_code):
     user = db.session.query(User, emp_code)
     groups = db.session.query(Group).all()
@@ -1975,13 +2037,13 @@ def login():
     if request.method == "POST":
         data = request.get_json()
         user = db.session.query(User).filter(User.username == data['username']).first()
-
         if not user or not check_password_hash(user.userpassword, data['password']):
             return jsonify({"error": "اسم مستخدم أو كلمة مرور خاطئة"}), 401
         else:
             if user.is_active:
-                login_user(user)
-                return jsonify(current_user=current_user.to_dict()), 200
+                # login_user(user)
+                token = create_access_token(identity=user.emp_code)
+                return jsonify(current_user=user.to_dict(), token=token), 200
             else:
                 return jsonify({
                     "error": "هذا الحساب غير مفعل، برجاء مراجعة الادارة العامة لتكنولوجيا المعلومات لتفعيل حسابك"}), 410
@@ -2024,11 +2086,12 @@ def change_password():
 
 @app.route("/logout")
 def logout():
-    logout_user()
+    # logout_user()
     return jsonify({"response": "لا حول ولا قوة إلا بالله العلي العظيم"})
 
 
 @app.route("/groups")
+@private_route([1])
 def groups():
     groups = db.session.query(Group).all()
     groups_list = [group.to_dict() for group in groups]
@@ -2036,6 +2099,7 @@ def groups():
 
 
 @app.route("/edit-group/<group_id>", methods=["GET", "POST"])
+@private_route([1])
 def edit_group(group_id):
     group = db.session.get(Group, group_id)
     if request.method == "POST":
@@ -2068,6 +2132,7 @@ def edit_group(group_id):
 
 
 @app.route("/new-group", methods=["GET", "POST"])
+@private_route([1])
 def add_new_group():
     if request.method == "POST":
         data = request.get_json()
@@ -2102,6 +2167,7 @@ def add_new_group():
 
 
 @app.route("/permissions")
+@private_route([1])
 def all_permissions():
     permissions = db.session.query(Permission).all()
     permissions_list = [permission.to_dict() for permission in permissions]
@@ -2109,6 +2175,7 @@ def all_permissions():
 
 
 @app.route("/new-permission", methods=["GET", "POST"])
+@private_route([1])
 def add_new_permission():
     if request.method == "POST":
         data = request.get_json()
@@ -2142,6 +2209,7 @@ def add_new_permission():
 
 
 @app.route("/delete-permission/<permission_id>", methods=["GET", "POST"])
+@private_route([1])
 def delete_permission(permission_id):
     permission = db.session.get(Permission, permission_id)
     db.session.delete(permission)
@@ -2170,6 +2238,7 @@ def delete_permission(permission_id):
 
 
 @app.route("/group-permissions")
+@private_route([1])
 def all_group_permissions():
     group_permissions = db.session.query(Permission).all()
     group_permissions_list = [g_p.to_dict() for g_p in group_permissions]
@@ -2177,6 +2246,7 @@ def all_group_permissions():
 
 
 @app.route("/new-group-permission", methods=["GET", "POST"])
+@private_route([1])
 def new_group_permission():
     groups = db.session.query(Group).all()
     groups_list = [group.to_dict() for group in groups]
@@ -2216,6 +2286,7 @@ def new_group_permission():
 
 
 @app.route("/delete-group-permission/<group_id>/<permission_id>", methods=["GET", "post"])
+@private_route([1])
 def delete_group_permission(group_id, permission_id):
     g_p = db.session.get(GroupPermission, (group_id, permission_id))
     db.session.delete(g_p)

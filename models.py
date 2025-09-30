@@ -318,7 +318,7 @@ class User(UserMixin, db.Model):
     emp_code = db.Column(NVARCHAR(8), primary_key=True)
     emp_name = db.Column(NVARCHAR(400), unique=True, nullable=False)
     username = db.Column(NVARCHAR(30), unique=True)
-    userpassword = db.Column(NVARCHAR(30), nullable=False)
+    userpassword = db.Column(NVARCHAR(300), nullable=False)
     group_id = db.Column(Integer, db.ForeignKey('groups.group_id'))
     is_active = db.Column(Boolean, nullable=False)
 
@@ -332,5 +332,6 @@ class User(UserMixin, db.Model):
     def to_dict(self):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
         data['group_name'] = self.group.group_name if self.group else None
+        data.pop('userpassword', None)
         # data.pop('group_id', None)
         return data
