@@ -96,7 +96,7 @@ def private_route(allowed_groups):
                 return jsonify({'error': 'Access forbidden', 'required_groups': allowed_groups}), 403
 
             # Pass user to the route function (optional but useful)
-            kwargs['current_user'] = user   # pass current_user as input to func to access the object
+            # kwargs['current_user'] = user   # pass current_user or **kwargs as input to func to access the object
 
             return f(*args, **kwargs)
 
@@ -1637,6 +1637,7 @@ def predict(station_id):
 
 
 @app.route("/reports", methods=["GET", "POST"])
+@private_route([1, 2, 3, 4])
 def show_reports():
     if request.method == "POST":
         data = request.get_json()
