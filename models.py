@@ -166,7 +166,7 @@ class GuageBill(db.Model):
     prev_reading = db.Column(Float, nullable=False)
     current_reading = db.Column(Float, nullable=False)
     reading_factor = db.Column(Integer, nullable=False)
-    power_consump = db.Column(BigInteger, nullable=False)
+    power_consump = db.Column(Float, nullable=False)
     voltage_id = db.Column(Integer, db.ForeignKey('voltage.voltage_id'), nullable=False)
     voltage_cost = db.Column(NVARCHAR(50), nullable=False)
     consump_cost = db.Column(Numeric(19, 4), nullable=False)
@@ -323,6 +323,7 @@ class User(UserMixin, db.Model):
     is_active = db.Column(Boolean, nullable=False)
 
     group = db.relationship('Group', back_populates='users')
+    audits = db.relationship("Auditing", back_populates="user")
 
     # Optional if you don’t want to rename your PK
     def get_id(self):
@@ -335,3 +336,22 @@ class User(UserMixin, db.Model):
         data.pop('userpassword', None)
         # data.pop('group_id', None)
         return data
+
+
+class Auditing(db.Model):
+    __tablename__ = "auditing"
+
+    audit_id = db.Column(Integer, primary_key=True, autoincrement=True)
+    username = db.Column(db.String(30), db.ForeignKey("users.username"), nullable=False)
+    audit_date = db.Column(db.DateTime, nullable=False)
+    audit_query = db.Column(db.Text, nullable=False)
+
+    # Relationships
+    user = db.relationship("User", back_populates="audits")
+
+    def to_dict(self):
+        return {
+            "username": self.username,
+            "audit_date": self.audit_date.isoformat() if self.audit_date else None,
+            "audit_query": self.audit_query,
+        }
