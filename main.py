@@ -1,7 +1,7 @@
 import os
 from decimal import Decimal
 
-from flask import Flask, abort, jsonify, render_template, request, make_response
+from flask import Flask, abort, jsonify, render_template, request, make_response, current_app
 from sqlalchemy import and_, or_, not_, func, case, event
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, DataError
 from flask_cors import CORS
@@ -14,6 +14,7 @@ from functools import wraps
 from datetime import datetime, timedelta
 import pandas as pd
 import matplotlib
+import json
 
 matplotlib.use("Agg")  # ← force headless, non‑GUI backend
 import matplotlib.pyplot as plt
@@ -73,33 +74,55 @@ jwt = JWTManager(app)
 with app.app_context():
     db.create_all()
 
-    # Enable auditing for insert, update and delete actions
+    # # Enable auditing for insert, update and delete actions
     @event.listens_for(db.engine, "after_execute")
     def after_execute(conn, clauseelement, multiparams, params, execution_options, result):
-        # Convert to SQL string
-        stmt = str(clauseelement).strip().upper()
-
-        # Ignore SELECTs and auditing table itself
-        if not (stmt.startswith("INSERT") or stmt.startswith("UPDATE") or stmt.startswith("DELETE")):
-            return
-        if "AUDITING" in stmt:
-            return
-
-        # Get current user identity from JWT
         try:
-            emp_code = get_jwt_identity()
-            user = db.session.get(User, emp_code)
-            username = user.username if user else "system"
+            # normalize statement text
+            stmt_text = str(clauseelement)
+            stmt_upper = stmt_text.strip().upper()
+
+            # only log writes
+            if not (stmt_upper.startswith("INSERT") or stmt_upper.startswith("UPDATE") or stmt_upper.startswith(
+                    "DELETE")):
+                return
+            if "AUDITING" in stmt_upper:
+                return
+
+            # who?
+            try:
+                identity = get_jwt_identity()
+                # optional: resolve username or read from token claims
+                user = db.session.get(User, identity) if identity else None
+                username = user.username if user else (identity or "system")
+            except Exception:
+                username = "system"
+
+            # params serialization
+            if multiparams:
+                params_repr = json.dumps(multiparams, default=str)
+            elif params:
+                params_repr = json.dumps(params, default=str)
+            else:
+                params_repr = None
+
+            query_str = stmt_text
+            if params_repr:
+                query_str += " | params=" + params_repr
+
+            # safe insert using raw connection; protect against errors
+            try:
+                conn.execute(
+                    text("INSERT INTO auditing (username, audit_date, audit_query) VALUES (:u, SYSUTCDATETIME(), :q)"),
+                    {"u": username, "q": query_str}
+                )
+            except Exception as e:
+                # log but don't raise — auditing must not break main flow
+                current_app.logger.exception("Failed to write audit: %s", e)
+
         except Exception:
-            username = "system"
-
-        # Build query string with params if available
-        query_str = str(clauseelement)
-        if params:
-            query_str += f" | params={params}"
-
-        # Write to audit
-        log_audit(username, query_str, connection=conn)
+            # defensive: never allow audit listener to propagate exceptions
+            current_app.logger.exception("Audit listener failed")
 
 
 migrate = Migrate(app, db)
@@ -138,6 +161,10 @@ migrate = Migrate(app, db)
 #         print(f"Auth header present: {auth_header[:30]}...")
 #     else:
 #         print("No Authorization header!")
+@app.errorhandler(422)
+def handle_422(e):
+    print("💥 422 error:", e)
+    return {"error": "Unprocessable Entity", "message": str(e)}, 422
 
 # Create my own decorators and functions
 def log_audit(username, query, connection=None):
