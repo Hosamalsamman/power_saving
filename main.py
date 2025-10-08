@@ -1,8 +1,8 @@
 import os
 from decimal import Decimal
 
-from flask import Flask, abort, jsonify, render_template, request, make_response, current_app
-from sqlalchemy import and_, or_, not_, func, case, event
+from flask import Flask, abort, jsonify, render_template, request, make_response, current_app, g, has_request_context, session as flask_session
+from sqlalchemy import and_, or_, not_, func, case, event, inspect
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, DataError
 from flask_cors import CORS
 from models import *
@@ -71,58 +71,184 @@ app.config['JWT_SECRET_KEY'] = os.getenv("FLASK_KEY")
 # Access token: 30 days
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=30)
 jwt = JWTManager(app)
+
+@event.listens_for(db.session, "before_commit")
+def before_commit(session):
+    """Collect audit entries before commit (insert/update/delete)"""
+    try:
+        # 🚫 Skip auditing completely if g.skip_audit is set
+        if has_request_context() and getattr(g, "skip_audit", False):
+            g.audit_entries = []  # ensure it's empty
+            return
+        if not has_request_context():
+            return
+
+        username = getattr(g, 'current_user_username', None) or flask_session.get('username', 'system')
+        audit_entries = []
+
+        # === INSERTS ===
+        for obj in session.new:
+            if hasattr(obj, '__tablename__') and obj.__tablename__ != 'auditing':
+                new_data = {
+                    col.name: getattr(obj, col.name)
+                    for col in obj.__table__.columns
+                }
+                audit_entries.append({
+                    'username': username,
+                    'action': 'INSERT',
+                    'table_name': obj.__tablename__,
+                    'old_data': None,
+                    'new_data': new_data
+                })
+
+        # === UPDATES ===
+        for obj in session.dirty:
+            if hasattr(obj, '__tablename__') and obj.__tablename__ != 'auditing':
+                insp = inspect(obj)
+                if not insp.attrs:
+                    continue
+
+                old_data = {}
+                new_data = {}
+                for attr in insp.attrs:
+                    hist = attr.history
+                    if hist.has_changes():
+                        old_val = hist.deleted[0] if hist.deleted else None
+                        new_val = hist.added[0] if hist.added else None
+                        old_data[attr.key] = old_val
+                        new_data[attr.key] = new_val
+
+                if old_data or new_data:
+                    audit_entries.append({
+                        'username': username,
+                        'action': 'UPDATE',
+                        'table_name': obj.__tablename__,
+                        'old_data': old_data,
+                        'new_data': new_data
+                    })
+
+        # === DELETES ===
+        for obj in session.deleted:
+            if hasattr(obj, '__tablename__') and obj.__tablename__ != 'auditing':
+                old_data = {
+                    col.name: getattr(obj, col.name)
+                    for col in obj.__table__.columns
+                }
+                audit_entries.append({
+                    'username': username,
+                    'action': 'DELETE',
+                    'table_name': obj.__tablename__,
+                    'old_data': old_data,
+                    'new_data': None
+                })
+
+        # Save for after_commit
+        g.audit_entries = audit_entries
+
+    except Exception as e:
+        if has_request_context():
+            current_app.logger.error(f"[AUDIT before_commit] Error: {e}")
+
+
+@event.listens_for(db.session, "after_commit")
+def after_commit(session):
+    """Write collected audit entries after successful commit"""
+    try:
+        if not has_request_context():
+            return
+
+        # 🚫 Skip auditing if g.skip_audit is True
+        if getattr(g, "skip_audit", False):
+            return
+
+        audit_entries = getattr(g, 'audit_entries', [])
+        if not audit_entries:
+            return
+
+        with db.engine.begin() as conn:
+            for entry in audit_entries:
+                print(f"[AUDIT DEBUG] Writing {len(audit_entries)} audit entries...")
+                for e in audit_entries:
+                    print(json.dumps(e, indent=2, ensure_ascii=False))
+                conn.execute(
+                    text("""
+                                            INSERT INTO auditing (username, audit_date, action, table_name, old_data, new_data)
+                                            VALUES (:u, :d, :a, :t, :old, :new)
+                                        """),
+                    {
+                        'u': entry['username'],
+                        'd': datetime.now(),  # 👈 local timestamp
+                        'a': entry['action'],
+                        't': entry['table_name'],
+                        'old': json.dumps(entry['old_data'], ensure_ascii=False) if entry['old_data'] else None,
+                        'new': json.dumps(entry['new_data'], ensure_ascii=False) if entry['new_data'] else None
+                    }
+                )
+
+    except Exception as e:
+        if has_request_context():
+            current_app.logger.error(f"[AUDIT after_commit] Error: {e}")
+
+
+@event.listens_for(db.session, "after_rollback")
+def after_rollback(session):
+    """Clean audit buffer on rollback"""
+    if has_request_context() and hasattr(g, 'audit_entries'):
+        delattr(g, 'audit_entries')
+
+
 with app.app_context():
     db.create_all()
 
-    # # Enable auditing for insert, update and delete actions
-    @event.listens_for(db.engine, "after_execute")
-    def after_execute(conn, clauseelement, multiparams, params, execution_options, result):
-        try:
-            # normalize statement text
-            stmt_text = str(clauseelement)
-            stmt_upper = stmt_text.strip().upper()
-
-            # only log writes
-            if not (stmt_upper.startswith("INSERT") or stmt_upper.startswith("UPDATE") or stmt_upper.startswith(
-                    "DELETE")):
-                return
-            if "AUDITING" in stmt_upper:
-                return
-
-            # who?
-            try:
-                identity = get_jwt_identity()
-                # optional: resolve username or read from token claims
-                user = db.session.get(User, identity) if identity else None
-                username = user.username if user else (identity or "system")
-            except Exception:
-                username = "system"
-
-            # params serialization
-            if multiparams:
-                params_repr = json.dumps(multiparams, default=str)
-            elif params:
-                params_repr = json.dumps(params, default=str)
-            else:
-                params_repr = None
-
-            query_str = stmt_text
-            if params_repr:
-                query_str += " | params=" + params_repr
-
-            # safe insert using raw connection; protect against errors
-            try:
-                conn.execute(
-                    text("INSERT INTO auditing (username, audit_date, audit_query) VALUES (:u, SYSUTCDATETIME(), :q)"),
-                    {"u": username, "q": query_str}
-                )
-            except Exception as e:
-                # log but don't raise — auditing must not break main flow
-                current_app.logger.exception("Failed to write audit: %s", e)
-
-        except Exception:
-            # defensive: never allow audit listener to propagate exceptions
-            current_app.logger.exception("Audit listener failed")
+    # # # Enable auditing for insert, update and delete actions
+    # @event.listens_for(db.engine, "after_execute")
+    # def after_execute(conn, clauseelement, multiparams, params, execution_options, result):
+    #     try:
+    #         # normalize statement text
+    #         stmt_text = str(clauseelement)
+    #         stmt_upper = stmt_text.strip().upper()
+    #
+    #         # only log writes
+    #         if not (stmt_upper.startswith("INSERT") or stmt_upper.startswith("UPDATE") or stmt_upper.startswith(
+    #                 "DELETE")):
+    #             return
+    #         if "AUDITING" in stmt_upper:
+    #             return
+    #
+    #         # who?
+    #         try:
+    #             identity = get_jwt_identity()
+    #             # optional: resolve username or read from token claims
+    #             user = db.session.get(User, identity) if identity else None
+    #             username = user.username if user else (identity or "system")
+    #         except Exception:
+    #             username = "system"
+    #
+    #         # params serialization
+    #         if multiparams:
+    #             params_repr = json.dumps(multiparams, default=str)
+    #         elif params:
+    #             params_repr = json.dumps(params, default=str)
+    #         else:
+    #             params_repr = None
+    #
+    #         query_str = stmt_text
+    #         if params_repr:
+    #             query_str += " | params=" + params_repr
+    #
+    #         # safe insert using raw connection; protect against errors
+    #         try:
+    #             conn.execute(
+    #                 text("INSERT INTO auditing (username, audit_date, audit_query) VALUES (:u, SYSUTCDATETIME(), :q)"),
+    #                 {"u": username, "q": query_str}
+    #             )
+    #         except Exception as e:
+    #             # log but don't raise — auditing must not break main flow
+    #             current_app.logger.exception("Failed to write audit: %s", e)
+    #
+    #     except Exception:
+    #         # defensive: never allow audit listener to propagate exceptions
+    #         current_app.logger.exception("Audit listener failed")
 
 
 migrate = Migrate(app, db)
@@ -167,25 +293,25 @@ def handle_422(e):
     return {"error": "Unprocessable Entity", "message": str(e)}, 422
 
 # Create my own decorators and functions
-def log_audit(username, query, connection=None):
-    if connection:
-        # ✅ Use raw SQL inside event (no ORM)
-        connection.execute(
-            text("""
-                INSERT INTO auditing (username, audit_date, audit_query)
-                VALUES (:username, GETDATE(), :query)
-            """),
-            {"username": username, "query": query}
-        )
-    else:
-        # ✅ Normal ORM path
-        audit = Auditing(
-            username=username,
-            audit_date=datetime.now(),
-            audit_query=query
-        )
-        db.session.add(audit)
-        db.session.commit()
+# def log_audit(username, query, connection=None):
+#     if connection:
+#         # ✅ Use raw SQL inside event (no ORM)
+#         connection.execute(
+#             text("""
+#                 INSERT INTO auditing (username, audit_date, audit_query)
+#                 VALUES (:username, GETDATE(), :query)
+#             """),
+#             {"username": username, "query": query}
+#         )
+#     else:
+#         # ✅ Normal ORM path
+#         audit = Auditing(
+#             username=username,
+#             audit_date=datetime.now(),
+#             audit_query=query
+#         )
+#         db.session.add(audit)
+#         db.session.commit()
 
 
 def private_route(allowed_groups):
@@ -210,6 +336,12 @@ def private_route(allowed_groups):
 
             # Pass user to the route function (optional but useful)
             kwargs['current_user'] = user   # pass current_user or **kwargs as input to func to access the object
+
+            # ✅ Store username in g and flask_session for fallback
+            g.current_user_username = user.username
+            g.current_user_emp_code = user.emp_code
+            g.current_user = user
+            flask_session['username'] = user.username
 
             return f(*args, **kwargs)
 
@@ -953,6 +1085,10 @@ def add_new_bill(account_number, current_user):
         else:
             new_bill.guage.final_reading = new_bill.current_reading
             db.session.commit()
+
+            # --- skip audit for the automatic updates
+            g.skip_audit = True
+
             #  search station gauge technology relation then insert in technology bill the corresponding data
             # one to one relations or many to one relations
             if len(gauge_sgts) == 1:
@@ -1003,6 +1139,10 @@ def add_new_bill(account_number, current_user):
                         )
                         db.session.add(tech_bill)
             db.session.commit()
+
+            # --- # ensure it’s turned back off
+            g.skip_audit = False
+
             response = {
                 "response": {
                     "success": "تم إضافة الفاتورة بنجاح"
@@ -1314,6 +1454,9 @@ def new_chemical(current_user):
                 ).all()
             # set corresponding ref. values
             if bills:
+                print(len(bills))
+                # Tell the listeners to skip audit
+                g.skip_audit = True
                 for bill in bills:
                     bill.chlorine_range_from = new_chemical_ref.chlorine_range_from
                     bill.chlorine_range_to = new_chemical_ref.chlorine_range_to
@@ -1322,6 +1465,10 @@ def new_chemical(current_user):
                     bill.solid_alum_range_from = new_chemical_ref.solid_alum_range_from
                     bill.solid_alum_range_to = new_chemical_ref.solid_alum_range_to
                 db.session.commit()
+
+                # Cleanup after done
+                del g.skip_audit
+
             response = {
                 "response": {
                     "success": "تم إدخال القيم المرجعية بنجاح"

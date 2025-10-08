@@ -341,17 +341,25 @@ class User(UserMixin, db.Model):
 class Auditing(db.Model):
     __tablename__ = "auditing"
 
-    audit_id = db.Column(Integer, primary_key=True, autoincrement=True)
+    audit_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     username = db.Column(db.String(30), db.ForeignKey("users.username"), nullable=False)
     audit_date = db.Column(db.DateTime, nullable=False)
-    audit_query = db.Column(db.Text, nullable=False)
+    action = db.Column(db.String(10), nullable=False)             # INSERT / UPDATE / DELETE
+    table_name = db.Column(db.String(100), nullable=False)
+    old_data = db.Column(db.Text, nullable=True)                  # JSON string of old values
+    new_data = db.Column(db.Text, nullable=True)                  # JSON string of new values
 
     # Relationships
     user = db.relationship("User", back_populates="audits")
 
     def to_dict(self):
+        """Return a serializable dictionary of the audit record."""
         return {
+            "audit_id": self.audit_id,
             "username": self.username,
             "audit_date": self.audit_date.isoformat() if self.audit_date else None,
-            "audit_query": self.audit_query,
+            "action": self.action,
+            "table_name": self.table_name,
+            "old_data": self.old_data,
+            "new_data": self.new_data,
         }
