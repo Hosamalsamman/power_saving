@@ -1152,7 +1152,15 @@ def add_new_bill(account_number, current_user):
     return jsonify(gauge_sgt_list=gauge_sgt_list)  #, show_percent=show_percent
 
 
-@app.route("/delete-bill/<path:account_number>", methods=['POST'])
+@app.route("/view-bills", methods=["GET"])
+@private_route([1, 3])
+def view_bills(current_user):
+    bills = db.session.query(GuageBill).all()
+    bills_list = [bill.to_dict() for bill in bills]
+    return jsonify(bills_list)
+
+
+@app.route("/delete-bill/<path:account_number>", methods=['GET'])
 @private_route([1, 3])
 def delete_bill(account_number, current_user):
     wrong_bill = (
@@ -1177,6 +1185,10 @@ def delete_bill(account_number, current_user):
         ).first()
         if tech_bill:
             tech_bills_related.append(tech_bill)
+
+    # --- skip audit for the automatic updates
+    g.skip_audit = True
+
     for t_b in tech_bills_related:
         if t_b.technology_bill_percentage == None or t_b.technology_bill_percentage == 100:
             t_b.technology_power_consump -= wrong_bill.power_consump
@@ -1188,9 +1200,12 @@ def delete_bill(account_number, current_user):
     gauge = db.session.get(Gauge, account_number)
     gauge.final_reading = wrong_bill.prev_reading
     db.session.commit()
+
+    # --- skip audit for the automatic updates
+    g.skip_audit = False
+
     db.session.delete(wrong_bill)
     return jsonify({"response": "تم حذف الفاتورة بنجاح"}), 200
-
 
 
 @app.route("/tech-bills")
@@ -1299,6 +1314,15 @@ def edit_tech_bill(tech_bill_id, current_user):
             }
             return jsonify(response), 200
     return jsonify(bill.to_dict())
+
+
+@app.route("/view-tech-bills", methods=["GET"])
+@private_route([1, 2, 3])
+def view_tech_bills(current_user):
+    tech_bills = db.session.query(TechnologyBill).filter(TechnologyBill.technology_bill_percentage.isnot(None)).all()
+    t_b_list = [bill.to_dict() for bill in tech_bills]
+    return jsonify(t_b_list)
+
 
 
 # Add route to change voltage cost
@@ -1990,7 +2014,6 @@ def show_reports(current_user):
                 } for bill in bills
             ]
             print(bills_list)
-            df = pd.DataFrame(bills_list)
             return jsonify(bills_list)
         elif data['report_name'] == "branch_total":
             # Use parentheses instead of backslashes
@@ -2232,6 +2255,43 @@ def show_reports(current_user):
                     "total_bill": float(bill.total_bill) if bill.total_bill else 0,
                     "percent": "{:.2f}".format(float(bill.total_bill) / float(bill.total_power)) if bill.total_power else "0.00",
                 } for bill in bills
+            ]
+            print(bills_list)
+            return jsonify(bills_list)
+        elif data['report_name'] == "bills":
+            query = (
+                db.session.query(
+                    GuageBill.bill_year,
+                    GuageBill.bill_month,
+                    GuageBill.account_number,
+                    GuageBill.bill_total,
+                    GuageBill.is_paid,
+                    GuageBill.delay_month,
+                    GuageBill.delay_year,
+                )
+                .filter(
+                    or_(
+                        and_(GuageBill.bill_year == datetime.strptime(data['from_date'], "%Y-%m-%d").year,
+                             GuageBill.bill_month >= datetime.strptime(data['from_date'], "%Y-%m-%d").month),
+                        and_(GuageBill.bill_year > datetime.strptime(data['from_date'], "%Y-%m-%d").year,
+                             GuageBill.bill_year < datetime.strptime(data['to_date'], "%Y-%m-%d").year),
+                        and_(GuageBill.bill_year == datetime.strptime(data['to_date'], "%Y-%m-%d").year,
+                             GuageBill.bill_month <= datetime.strptime(data['to_date'], "%Y-%m-%d").month)
+                    )
+                )
+            )
+            bills = query.all()
+            bills_list = [
+                {
+                    "year": b.bill_year,
+                    "month": b.bill_month,
+                    "account_number": b.account_number,
+                    "total_bill": float(b.bill_total),
+                    "is_paid": b.is_paid,
+                    "delay_month": b.delay_month,
+                    "delay_year": b.delay_year,
+                }
+                for b in bills
             ]
             print(bills_list)
             return jsonify(bills_list)
