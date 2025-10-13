@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Float, ForeignKey, NVARCHAR, Numeric, DECIMAL
@@ -185,10 +187,22 @@ class GuageBill(db.Model):
     guage = db.relationship('Gauge', back_populates='bills')
     voltage = db.relationship('Voltage', back_populates='bills')
 
+    # def to_dict(self):
+    #     data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+    #     data['voltage_type'] = self.voltage.voltage_type if self.voltage else None
+    #     return data
+
     def to_dict(self):
-        data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
-        data['voltage_type'] = self.voltage.voltage_type if self.voltage else None
-        return data
+        result = {}
+        for col in self.__table__.columns:
+            val = getattr(self, col.name)
+            if isinstance(val, Decimal):
+                val = float(val)
+            result[col.name] = val
+
+        result['voltage_type'] = self.voltage.voltage_type if self.voltage else None
+        return result
+
 
     # # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres
     # def __init__(self, **kwargs):
@@ -348,6 +362,7 @@ class Auditing(db.Model):
     table_name = db.Column(db.String(100), nullable=False)
     old_data = db.Column(db.Text, nullable=True)                  # JSON string of old values
     new_data = db.Column(db.Text, nullable=True)                  # JSON string of new values
+    row_id = db.Column(db.Text, nullable=True)
 
     # Relationships
     user = db.relationship("User", back_populates="audits")

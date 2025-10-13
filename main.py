@@ -98,7 +98,8 @@ def before_commit(session):
                     'action': 'INSERT',
                     'table_name': obj.__tablename__,
                     'old_data': None,
-                    'new_data': new_data
+                    'new_data': new_data,
+                    'row_id': obj  # temporarily store the object itself
                 })
 
         # === UPDATES ===
@@ -124,7 +125,8 @@ def before_commit(session):
                         'action': 'UPDATE',
                         'table_name': obj.__tablename__,
                         'old_data': old_data,
-                        'new_data': new_data
+                        'new_data': new_data,
+                        'row_id': obj  # temporarily store the object itself
                     })
 
         # === DELETES ===
@@ -139,7 +141,8 @@ def before_commit(session):
                     'action': 'DELETE',
                     'table_name': obj.__tablename__,
                     'old_data': old_data,
-                    'new_data': None
+                    'new_data': None,
+                    'row_id': obj  # temporarily store the object itself
                 })
 
         # Save for after_commit
@@ -148,6 +151,54 @@ def before_commit(session):
     except Exception as e:
         if has_request_context():
             current_app.logger.error(f"[AUDIT before_commit] Error: {e}")
+
+
+@event.listens_for(db.session, "after_flush")
+def after_flush(session, flush_context):
+    """
+    Fill in autoincrement PKs for audit entries collected in before_commit.
+    Works with composite primary keys and skips already-filled IDs.
+    """
+    try:
+        if not has_request_context():
+            return
+        if not hasattr(g, "audit_entries"):
+            return
+
+        if getattr(g, "skip_audit", False):
+            # ensure we don't leave stale audit entries
+            g.audit_entries = []
+            return
+
+        for entry in getattr(g, "audit_entries", []):
+            obj = entry.get("row_id")
+
+            # Only process if we stored an object reference (not already a dict)
+            if obj is None or isinstance(obj, dict):
+                continue
+
+            try:
+                # Get PK columns dynamically (works for composite PKs)
+                pk_cols = inspect(obj.__class__).primary_key
+
+                # Build a dict of PK values (after flush they should exist)
+                pk_values = {
+                    col.name: getattr(obj, col.name)
+                    for col in pk_cols
+                    if getattr(obj, col.name) is not None
+                }
+
+                # ✅ Only replace if all PK values are available and valid
+                if pk_values and all(v is not None for v in pk_values.values()):
+                    entry["row_id"] = pk_values
+
+            except Exception as inner_e:
+                current_app.logger.error(
+                    f"[AUDIT after_flush] Failed to resolve PK for {obj}: {inner_e}"
+                )
+
+    except Exception as e:
+        current_app.logger.error(f"[AUDIT after_flush] Error: {e}")
 
 
 @event.listens_for(db.session, "after_commit")
@@ -168,20 +219,32 @@ def after_commit(session):
         with db.engine.begin() as conn:
             for entry in audit_entries:
                 print(f"[AUDIT DEBUG] Writing {len(audit_entries)} audit entries...")
-                for e in audit_entries:
-                    print(json.dumps(e, indent=2, ensure_ascii=False))
+                print(json.dumps(entry, indent=2, ensure_ascii=False))
+                obj = entry.get("row_id")
+
+                if obj is not None and not isinstance(obj, dict):
+                    try:
+                        insp = inspect(obj.__class__)
+                        entry["row_id"] = {
+                            col.name: getattr(obj, col.name)
+                            for col in insp.primary_key
+                        }
+                    except Exception as e:
+                        current_app.logger.warning(f"[AUDIT] Could not inspect PK for {obj}: {e}")
+                        entry["row_id"] = None
                 conn.execute(
                     text("""
-                                            INSERT INTO auditing (username, audit_date, action, table_name, old_data, new_data)
-                                            VALUES (:u, :d, :a, :t, :old, :new)
-                                        """),
+                                        INSERT INTO auditing (username, audit_date, action, table_name, row_id, old_data, new_data)
+                                        VALUES (:u, :d, :a, :t, :r, :old, :new)
+                                    """),
                     {
-                        'u': entry['username'],
-                        'd': datetime.now(),  # 👈 local timestamp
-                        'a': entry['action'],
-                        't': entry['table_name'],
-                        'old': json.dumps(entry['old_data'], ensure_ascii=False) if entry['old_data'] else None,
-                        'new': json.dumps(entry['new_data'], ensure_ascii=False) if entry['new_data'] else None
+                        "u": entry["username"],
+                        "d": datetime.now(),
+                        "a": entry["action"],
+                        "t": entry["table_name"],
+                        "r": json.dumps(entry["row_id"], ensure_ascii=False) if entry.get("row_id") else None,
+                        "old": json.dumps(entry["old_data"], ensure_ascii=False) if entry["old_data"] else None,
+                        "new": json.dumps(entry["new_data"], ensure_ascii=False) if entry["new_data"] else None,
                     }
                 )
 
@@ -1157,6 +1220,7 @@ def add_new_bill(account_number, current_user):
 def view_bills(current_user):
     bills = db.session.query(GuageBill).all()
     bills_list = [bill.to_dict() for bill in bills]
+    print(bills_list)
     return jsonify(bills_list)
 
 
