@@ -362,7 +362,6 @@ class Auditing(db.Model):
     table_name = db.Column(db.String(100), nullable=False)
     old_data = db.Column(db.Text, nullable=True)                  # JSON string of old values
     new_data = db.Column(db.Text, nullable=True)                  # JSON string of new values
-    row_id = db.Column(db.Text, nullable=True)
 
     # Relationships
     user = db.relationship("User", back_populates="audits")
