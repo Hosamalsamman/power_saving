@@ -72,6 +72,7 @@ app.config['JWT_SECRET_KEY'] = os.getenv("FLASK_KEY")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=30)
 jwt = JWTManager(app)
 
+
 @event.listens_for(db.session, "before_commit")
 def before_commit(session):
     """Collect audit entries before commit (insert/update/delete)"""
@@ -82,7 +83,6 @@ def before_commit(session):
             return
         if not has_request_context():
             return
-
         username = getattr(g, 'current_user_username', None) or flask_session.get('username', 'system')
         audit_entries = []
 
@@ -110,6 +110,13 @@ def before_commit(session):
 
                 old_data = {}
                 new_data = {}
+
+                # Include primary keys in both old/new for clear identification
+                pk_values = {
+                    key.name: getattr(obj, key.name)
+                    for key in inspect(obj.__class__).primary_key
+                }
+
                 for attr in insp.attrs:
                     hist = attr.history
                     if hist.has_changes():
@@ -119,6 +126,10 @@ def before_commit(session):
                         new_data[attr.key] = new_val
 
                 if old_data or new_data:
+                    # Merge PKs into old_data and new_data
+                    old_data.update(pk_values)
+                    new_data.update(pk_values)
+
                     audit_entries.append({
                         'username': username,
                         'action': 'UPDATE',
@@ -126,7 +137,6 @@ def before_commit(session):
                         'old_data': old_data,
                         'new_data': new_data,
                     })
-
         # === DELETES ===
         for obj in session.deleted:
             if hasattr(obj, '__tablename__') and obj.__tablename__ != 'auditing':
@@ -156,15 +166,13 @@ def after_commit(session):
     try:
         if not has_request_context():
             return
-
         # 🚫 Skip auditing if g.skip_audit is True
         if getattr(g, "skip_audit", False):
             return
-
         audit_entries = getattr(g, 'audit_entries', [])
+
         if not audit_entries:
             return
-
         with db.engine.begin() as conn:
             for entry in audit_entries:
                 print(f"[AUDIT DEBUG] Writing {len(audit_entries)} audit entries...")
@@ -1231,15 +1239,35 @@ def edit_tech_bill(tech_bill_id, current_user):
 
     if request.method == "POST":
         data = request.get_json()
+        g.skip_audit = False
         # if data['technology_water_amount'] == 0:
         #     return jsonify({"error": "يجب أن تكون كمية المياه المنتجة اكبر من صفر"})
         # if data['technology_chlorine_consump'] == 0:
         #     return jsonify({"error": "يجب أن تكون كمية الكلور المستهلكة اكبر من صفر"})
-        bill.technology_liquid_alum_consump = data['technology_liquid_alum_consump'] * 1000
-        bill.technology_solid_alum_consump = data['technology_solid_alum_consump'] * 1000
-        bill.technology_chlorine_consump = data['technology_chlorine_consump'] * 1000
-        bill.technology_water_amount = data['technology_water_amount']
-        bill.power_per_water = bill.technology.power_per_water
+        with db.session.no_autoflush:
+            bill.technology_liquid_alum_consump = data['technology_liquid_alum_consump'] * 1000
+            bill.technology_solid_alum_consump = data['technology_solid_alum_consump'] * 1000
+            bill.technology_chlorine_consump = data['technology_chlorine_consump'] * 1000
+            bill.technology_water_amount = data['technology_water_amount']
+            bill.power_per_water = bill.technology.power_per_water
+
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            print(e)
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+
         current_season = get_season(bill.bill_month)
         current_water_source = bill.station.water_source_id
         chemicals_ref = db.session.query(AlumChlorineReference).filter(
@@ -1291,6 +1319,9 @@ def edit_tech_bill(tech_bill_id, current_user):
                     each_bill.technology_power_consump = float(Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * Decimal(str(each_bill.technology_power_consump)))
                     each_bill.technology_bill_total = float(Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * Decimal(str(each_bill.technology_bill_total)))
 
+        # --- skip audit for the automatic updates
+        g.skip_audit = True
+
         try:
             db.session.commit()
         except IntegrityError as e:
@@ -1314,6 +1345,9 @@ def edit_tech_bill(tech_bill_id, current_user):
                 }
             }
             return jsonify(response), 200
+        finally:
+            # ✅ Always re-enable auditing for future commits
+            g.skip_audit = False
     return jsonify(bill.to_dict())
 
 
@@ -1492,7 +1526,7 @@ def new_chemical(current_user):
                 db.session.commit()
 
                 # Cleanup after done
-                del g.skip_audit
+                g.skip_audit = False
 
             response = {
                 "response": {
