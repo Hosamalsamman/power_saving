@@ -521,22 +521,23 @@ def home():
         over_solid_alum_consump = []
         over_liquid_alum_consump = []
         for bill in current_month_bills:
-            if bill.power_per_water:
-                if bill.technology_bill_percentage and (
-                        bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water):
-                    over_power_consump.append(bill.to_dict())
-                if bill.chlorine_range_to and (
-                        (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (
-                        bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from):
-                    over_chlorine_consump.append(bill.to_dict())
-                if bill.solid_alum_range_to and ((
-                                                         bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (
-                                                         bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from):
-                    over_solid_alum_consump.append(bill.to_dict())
-                if bill.liquid_alum_range_to and ((
-                                                          bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
-                                                          bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from):
-                    over_liquid_alum_consump.append(bill.to_dict())
+            if bill.technology_water_amount:
+                if bill.power_per_water:
+                    if bill.technology_bill_percentage and (
+                            bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water):
+                        over_power_consump.append(bill.to_dict())
+                    if bill.chlorine_range_to and (
+                            (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (
+                            bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from):
+                        over_chlorine_consump.append(bill.to_dict())
+                    if bill.solid_alum_range_to and ((
+                                                             bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (
+                                                             bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from):
+                        over_solid_alum_consump.append(bill.to_dict())
+                    if bill.liquid_alum_range_to and ((
+                                                              bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
+                                                              bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from):
+                        over_liquid_alum_consump.append(bill.to_dict())
         # query with group by station to compare with water capacity
         query = (
             db.session.query(
@@ -1560,6 +1561,7 @@ def show_charts(station_id, tech_id):
     bills_list = [row.to_dict() for row in tech_bills]
     df_bills = pd.DataFrame(bills_list)
     df_bills.dropna(inplace=True)
+    df_bills = df_bills[df_bills['technology_water_amount'] != 0]
     df_bills.infer_objects(copy=False)
     # Show all columns
     pd.set_option('display.max_columns', None)
