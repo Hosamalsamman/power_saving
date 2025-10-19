@@ -1240,17 +1240,19 @@ def edit_tech_bill(tech_bill_id, current_user):
 
     if request.method == "POST":
         data = request.get_json()
+
+        g.skip_audit = True
+        bill.power_per_water = bill.technology.power_per_water
         g.skip_audit = False
+
         # if data['technology_water_amount'] == 0:
         #     return jsonify({"error": "يجب أن تكون كمية المياه المنتجة اكبر من صفر"})
         # if data['technology_chlorine_consump'] == 0:
         #     return jsonify({"error": "يجب أن تكون كمية الكلور المستهلكة اكبر من صفر"})
-        with db.session.no_autoflush:
-            bill.technology_liquid_alum_consump = data['technology_liquid_alum_consump'] * 1000
-            bill.technology_solid_alum_consump = data['technology_solid_alum_consump'] * 1000
-            bill.technology_chlorine_consump = data['technology_chlorine_consump'] * 1000
-            bill.technology_water_amount = data['technology_water_amount']
-            bill.power_per_water = bill.technology.power_per_water
+        bill.technology_liquid_alum_consump = data['technology_liquid_alum_consump'] * 1000
+        bill.technology_solid_alum_consump = data['technology_solid_alum_consump'] * 1000
+        bill.technology_chlorine_consump = data['technology_chlorine_consump'] * 1000
+        bill.technology_water_amount = data['technology_water_amount']
 
         try:
             db.session.commit()
@@ -1359,6 +1361,105 @@ def view_tech_bills(current_user):
     t_b_list = [bill.to_dict() for bill in tech_bills]
     return jsonify(t_b_list)
 
+
+def try_commit():
+    try:
+        db.session.commit()
+    except IntegrityError as e:
+        db.session.rollback()
+        return jsonify(
+            {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+    except DataError as e:
+        db.session.rollback()
+        return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        print(e)
+        return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+    else:
+        response = {
+            "response": {
+                "success": "تم تعديل البيانات بنجاح"
+            }
+        }
+        return jsonify(response), 200
+
+
+
+@app.route("/edit-old-tech-bills/<int:station_id>/<int:technology_id>/<int:month>/<int:year>", methods=["GET", "POST"])
+@private_route([1, 2])
+def edit_old_tech_bills(station_id, technology_id, month, year, current_user):
+    if request.method == "POST":
+        data = request.get_json()
+        bill = db.session.query(TechnologyBill).filter(
+            TechnologyBill.station_id == station_id,
+            TechnologyBill.technology_id == technology_id,
+            TechnologyBill.bill_month == month,
+            TechnologyBill.bill_year == year
+        ).first()
+
+        bill.technology_chlorine_consump = data['technology_chlorine_consump']
+        bill.technology_solid_alum_consump = data['technology_solid_alum_consump']
+        bill.technology_liquid_alum_consump = data['technology_liquid_alum_consump']
+
+        if bill.technology_water_amount == data['technology_water_amount']:
+            return try_commit()
+        else:
+            bill.tecnology_water_amount = data['technology_water_amount']
+            commit_result = try_commit()
+            if bill.technology_bill_percentage == None:
+                return commit_result
+            else:
+                curr_rel = db.session.query(StationGaugeTechnology).filter(
+                    StationGaugeTechnology.station_id == station_id,
+                    StationGaugeTechnology.technology_id == technology_id,
+                ).first()
+                gauge_sgts = db.session.query(StationGaugeTechnology).filter(
+                    and_(
+                        StationGaugeTechnology.account_number == curr_rel.account_number,
+                        StationGaugeTechnology.relation_status == True
+                    )
+                ).all()
+                tech_bills_related = []
+                for rel in gauge_sgts:
+                    tech_bill = db.session.query(TechnologyBill).filter(
+                        TechnologyBill.station_id == rel.station_id,
+                        TechnologyBill.technology_id == rel.technology_id,
+                        TechnologyBill.bill_month == month,
+                        TechnologyBill.bill_year == year
+                    ).first()
+                    if tech_bill:
+                        tech_bills_related.append(tech_bill)
+                if len(tech_bills_related) == 1:
+                    return commit_result
+                else:
+                    total_water = 0
+                    total_power = 0
+                    total_bill = 0
+                    for rel_bill in tech_bills_related:
+                        total_water += rel_bill.technology_water_amount
+                        total_power += rel_bill.technology_power_consump
+                        total_bill += float(str(rel_bill.technology_bill_total))
+
+                    # --- skip audit for the automatic updates
+                    g.skip_audit = True
+
+                    for rel_bill in tech_bills_related:
+                        rel_bill.technology_bill_percentage = rel_bill.technology_water_amount / total_water
+                        rel_bill.technology_power_consump = total_power * (rel_bill.technology_water_amount / total_water)
+                        rel_bill.technology_bill_total = total_bill * (rel_bill.technology_water_amount / total_water)
+
+                    try_commit()
+
+                    # --- skip audit for the automatic updates
+                    g.skip_audit = False
+
+                    return commit_result
+
+    return jsonify({"response": "سبحان الله وبحمده، سبحان الله العظيم"})
 
 
 # Add route to change voltage cost
@@ -1561,7 +1662,10 @@ def show_charts(station_id, tech_id):
     bills_list = [row.to_dict() for row in tech_bills]
     df_bills = pd.DataFrame(bills_list)
     df_bills.dropna(inplace=True)
-    df_bills = df_bills[df_bills['technology_water_amount'] != 0]
+    if not df_bills.empty:
+        df_bills = df_bills[df_bills['technology_water_amount'] != 0]
+    if df_bills.empty:
+        return jsonify({"error": "لا يوجد بيانات صالحة للتحليل"}), 503
     df_bills.infer_objects(copy=False)
     # Show all columns
     pd.set_option('display.max_columns', None)
