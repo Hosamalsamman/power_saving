@@ -2372,7 +2372,7 @@ def show_reports(current_user):
                     GuageBill.delay_year,
                 )
                 .filter(
-                    (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month)
+                    (GuageBill.bill_year * 100 + GuageBill.bill_month)
                     .between(from_key, to_key))
             )
             bills = query.all()
