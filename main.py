@@ -1205,7 +1205,7 @@ def delete_bill(account_number, current_user):
             t_b.technology_bill_total -= wrong_bill.bill_total
         else:
             t_b.technology_power_consump -= wrong_bill.power_consump * t_b.technology_bill_percentage / 100
-            t_b.technology_bill_total -= wrong_bill.bill_total * t_b.technology_bill_percentage / 100
+            t_b.technology_bill_total -= Decimal(float(str(wrong_bill.bill_total)) * t_b.technology_bill_percentage / 100)
     db.session.commit()
     gauge = db.session.get(Gauge, account_number)
     gauge.final_reading = wrong_bill.prev_reading
@@ -1215,6 +1215,7 @@ def delete_bill(account_number, current_user):
     g.skip_audit = False
 
     db.session.delete(wrong_bill)
+    db.session.commit()
     return jsonify({"response": "تم حذف الفاتورة بنجاح"}), 200
 
 
@@ -1408,7 +1409,7 @@ def edit_old_tech_bills(station_id, technology_id, month, year, current_user):
         if bill.technology_water_amount == data['technology_water_amount']:
             return try_commit()
         else:
-            bill.tecnology_water_amount = data['technology_water_amount']
+            bill.technology_water_amount = data['technology_water_amount']
             commit_result = try_commit()
             if bill.technology_bill_percentage == None:
                 return commit_result
@@ -2108,6 +2109,11 @@ def predict(station_id, current_user):
 def show_reports(current_user):
     if request.method == "POST":
         data = request.get_json()
+        from_date = datetime.strptime(data['from_date'], "%Y-%m-%d")
+        to_date = datetime.strptime(data['to_date'], "%Y-%m-%d")
+
+        from_key = from_date.year * 100 + from_date.month
+        to_key = to_date.year * 100 + to_date.month
         print(data)
         # if current_user.group_id == 1 or current_user.group_id == 2:  # Administrators or Tech-office
         if data['report_name'] == "branch_per_month":
@@ -2125,14 +2131,8 @@ def show_reports(current_user):
             )
             # Complex date range across years
             query = query.filter(
-                or_(
-                    and_(TechnologyBill.bill_year == datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                         TechnologyBill.bill_month >= datetime.strptime(data['from_date'], "%Y-%m-%d").month),
-                    and_(TechnologyBill.bill_year > datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                         TechnologyBill.bill_year < datetime.strptime(data['to_date'], "%Y-%m-%d").year),
-                    and_(TechnologyBill.bill_year == datetime.strptime(data['to_date'], "%Y-%m-%d").year,
-                         TechnologyBill.bill_month <= datetime.strptime(data['to_date'], "%Y-%m-%d").month)
-                )
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month)
+                .between(from_key, to_key)
             )
             query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
             query = query.join(TechnologyBill.station)
@@ -2169,14 +2169,8 @@ def show_reports(current_user):
             )
             # Complex date range across years
             query = query.filter(
-                or_(
-                    and_(TechnologyBill.bill_year == datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                         TechnologyBill.bill_month >= datetime.strptime(data['from_date'], "%Y-%m-%d").month),
-                    and_(TechnologyBill.bill_year > datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                         TechnologyBill.bill_year < datetime.strptime(data['to_date'], "%Y-%m-%d").year),
-                    and_(TechnologyBill.bill_year == datetime.strptime(data['to_date'], "%Y-%m-%d").year,
-                         TechnologyBill.bill_month <= datetime.strptime(data['to_date'], "%Y-%m-%d").month)
-                )
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month)
+                .between(from_key, to_key)
             )
             query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
             query = query.join(TechnologyBill.station)
@@ -2214,14 +2208,8 @@ def show_reports(current_user):
             query = query.join(TechnologyBill.technology)
             # Complex date range across years
             query = query.filter(
-                or_(
-                    and_(TechnologyBill.bill_year == datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                         TechnologyBill.bill_month >= datetime.strptime(data['from_date'], "%Y-%m-%d").month),
-                    and_(TechnologyBill.bill_year > datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                         TechnologyBill.bill_year < datetime.strptime(data['to_date'], "%Y-%m-%d").year),
-                    and_(TechnologyBill.bill_year == datetime.strptime(data['to_date'], "%Y-%m-%d").year,
-                         TechnologyBill.bill_month <= datetime.strptime(data['to_date'], "%Y-%m-%d").month)
-                )
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month)
+                .between(from_key, to_key)
             )
             query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
             query = query.group_by(TechnologyBill.technology_id, TechnologyBill.bill_year,
@@ -2256,14 +2244,8 @@ def show_reports(current_user):
             query = query.join(TechnologyBill.technology)
             # Complex date range across years
             query = query.filter(
-                or_(
-                    and_(TechnologyBill.bill_year == datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                         TechnologyBill.bill_month >= datetime.strptime(data['from_date'], "%Y-%m-%d").month),
-                    and_(TechnologyBill.bill_year > datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                         TechnologyBill.bill_year < datetime.strptime(data['to_date'], "%Y-%m-%d").year),
-                    and_(TechnologyBill.bill_year == datetime.strptime(data['to_date'], "%Y-%m-%d").year,
-                         TechnologyBill.bill_month <= datetime.strptime(data['to_date'], "%Y-%m-%d").month)
-                )
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month)
+                .between(from_key, to_key)
             )
             query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
             query = query.group_by(TechnologyBill.technology_id, Technology.technology_name)
@@ -2294,15 +2276,8 @@ def show_reports(current_user):
                 )
                 .join(TechnologyBill.station)
                 .filter(
-                    or_(
-                        and_(TechnologyBill.bill_year == datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                             TechnologyBill.bill_month >= datetime.strptime(data['from_date'], "%Y-%m-%d").month),
-                        and_(TechnologyBill.bill_year > datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                             TechnologyBill.bill_year < datetime.strptime(data['to_date'], "%Y-%m-%d").year),
-                        and_(TechnologyBill.bill_year == datetime.strptime(data['to_date'], "%Y-%m-%d").year,
-                             TechnologyBill.bill_month <= datetime.strptime(data['to_date'], "%Y-%m-%d").month)
-                    )
-                )
+                    (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month)
+                    .between(from_key, to_key))
                 .filter(TechnologyBill.technology_bill_percentage.isnot(None))
                 .group_by(
                     TechnologyBill.station_id,
@@ -2333,15 +2308,8 @@ def show_reports(current_user):
                 .join(TechnologyBill.technology)
                 .join(TechnologyBill.station)  # Needed for Station filtering
                 .filter(
-                    or_(
-                        and_(TechnologyBill.bill_year == datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                             TechnologyBill.bill_month >= datetime.strptime(data['from_date'], "%Y-%m-%d").month),
-                        and_(TechnologyBill.bill_year > datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                             TechnologyBill.bill_year < datetime.strptime(data['to_date'], "%Y-%m-%d").year),
-                        and_(TechnologyBill.bill_year == datetime.strptime(data['to_date'], "%Y-%m-%d").year,
-                             TechnologyBill.bill_month <= datetime.strptime(data['to_date'], "%Y-%m-%d").month)
-                    )
-                )
+                    (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month)
+                    .between(from_key, to_key))
                 .filter(TechnologyBill.technology_bill_percentage.isnot(None))
                 .filter(Station.station_type == "مياة")  # Filter by station type
                 .group_by(Technology.technology_main_type)  # ✅ Only group by main type
@@ -2372,15 +2340,8 @@ def show_reports(current_user):
                 .join(TechnologyBill.technology)
                 .join(TechnologyBill.station)  # Needed for Station filtering
                 .filter(
-                    or_(
-                        and_(TechnologyBill.bill_year == datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                             TechnologyBill.bill_month >= datetime.strptime(data['from_date'], "%Y-%m-%d").month),
-                        and_(TechnologyBill.bill_year > datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                             TechnologyBill.bill_year < datetime.strptime(data['to_date'], "%Y-%m-%d").year),
-                        and_(TechnologyBill.bill_year == datetime.strptime(data['to_date'], "%Y-%m-%d").year,
-                             TechnologyBill.bill_month <= datetime.strptime(data['to_date'], "%Y-%m-%d").month)
-                    )
-                )
+                    (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month)
+                    .between(from_key, to_key))
                 .filter(TechnologyBill.technology_bill_percentage.isnot(None))
                 .filter(Station.station_type == "صرف")  # Filter by station type
                 .group_by(Technology.technology_main_type)  # ✅ Only group by main type
@@ -2411,15 +2372,8 @@ def show_reports(current_user):
                     GuageBill.delay_year,
                 )
                 .filter(
-                    or_(
-                        and_(GuageBill.bill_year == datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                             GuageBill.bill_month >= datetime.strptime(data['from_date'], "%Y-%m-%d").month),
-                        and_(GuageBill.bill_year > datetime.strptime(data['from_date'], "%Y-%m-%d").year,
-                             GuageBill.bill_year < datetime.strptime(data['to_date'], "%Y-%m-%d").year),
-                        and_(GuageBill.bill_year == datetime.strptime(data['to_date'], "%Y-%m-%d").year,
-                             GuageBill.bill_month <= datetime.strptime(data['to_date'], "%Y-%m-%d").month)
-                    )
-                )
+                    (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month)
+                    .between(from_key, to_key))
             )
             bills = query.all()
             bills_list = [
