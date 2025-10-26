@@ -243,6 +243,8 @@ class TechnologyBill(db.Model):
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
         data['station_name'] = self.station.station_name if self.station else None
         data['technology_name'] = self.technology.technology_name if self.technology else None
+        data['branch_id'] = self.station.branch_id if self.station else None
+        data['branch_name'] = self.station.branch.branch_name if self.station and self.station.branch else None
         return data
 
     # # remove this when working on sqlserver , autoincrement=True will do the job for sqlserver OR , db.Sequence('station_gauge_seq') in postgres

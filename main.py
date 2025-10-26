@@ -140,8 +140,10 @@ def before_commit(session):
         # === DELETES ===
         for obj in session.deleted:
             if hasattr(obj, '__tablename__') and obj.__tablename__ != 'auditing':
+                state = inspect(obj)
+                # Read column values from the instance’s internal state dictionary
                 old_data = {
-                    col.name: getattr(obj, col.name)
+                    col.name: state.dict.get(col.name)
                     for col in obj.__table__.columns
                 }
                 audit_entries.append({
