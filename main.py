@@ -788,6 +788,7 @@ def add_new_tech(current_user):
 def gauges(current_user):
     all_gauges = db.session.query(Gauge).all()
     gauges_list = [gauge.to_dict() for gauge in all_gauges]
+    print(gauges_list)
 
     return jsonify(gauges_list)
 

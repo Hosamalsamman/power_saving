@@ -99,6 +99,14 @@ class Gauge(db.Model):
         data['voltage_type'] = self.voltage.voltage_type if self.voltage else None
         data['voltage_cost'] = self.voltage.voltage_cost if self.voltage else None
         data['fixed_fee'] = self.voltage.fixed_fee if self.voltage else None
+        # Since all related stations belong to the same branch
+        branch = None
+        if self.station_techs:
+            first_sgt = next((sgt for sgt in self.station_techs if sgt.station and sgt.station.branch), None)
+            if first_sgt:
+                branch = first_sgt.station.branch.branch_name
+
+        data['branch_name'] = branch
         return data
 
 
