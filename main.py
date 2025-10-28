@@ -503,9 +503,9 @@ def home():
     totals = {
         "power": float(totals_per_type.power or 0),
         "money": float(totals_per_type.money or 0),
-        "chlorine": float(totals_per_type.chlorine or 0),
-        "solid_alum": float(totals_per_type.solid_alum or 0),
-        "liquid_alum": float(totals_per_type.liquid_alum or 0),
+        "chlorine": float(totals_per_type.chlorine or 0) / 1000,
+        "solid_alum": float(totals_per_type.solid_alum or 0) / 1000,
+        "liquid_alum": float(totals_per_type.liquid_alum or 0) / 1000,
         "water": float(totals_per_type.water or 0),
         "sanitation": float(totals_per_type.sanitation or 0),
     }
@@ -516,30 +516,32 @@ def home():
             current_month = 12
             current_year -= 1
         current_month_bills = db.session.query(TechnologyBill).filter(
-            TechnologyBill.bill_month == current_month,
+            TechnologyBill.bill_month == 8,
             TechnologyBill.bill_year == current_year).all()
         over_power_consump = []
         over_chlorine_consump = []
         over_solid_alum_consump = []
         over_liquid_alum_consump = []
+        over_power_for_0_water = []
         for bill in current_month_bills:
-            if bill.technology_water_amount:
-                if bill.power_per_water:
-                    if bill.technology_bill_percentage and (
-                            bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water):
-                        over_power_consump.append(bill.to_dict())
-                    if bill.chlorine_range_to and (
-                            (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (
-                            bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from):
-                        over_chlorine_consump.append(bill.to_dict())
-                    if bill.solid_alum_range_to and ((
-                                                             bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (
-                                                             bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from):
-                        over_solid_alum_consump.append(bill.to_dict())
-                    if bill.liquid_alum_range_to and ((
-                                                              bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
-                                                              bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from):
-                        over_liquid_alum_consump.append(bill.to_dict())
+            if bill.power_per_water:
+                if bill.technology_water_amount and bill.technology_bill_percentage and (
+                        bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water):
+                    over_power_consump.append(bill.to_dict())
+                if bill.technology_water_amount and bill.chlorine_range_to and (
+                        (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (
+                        bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from):
+                    over_chlorine_consump.append(bill.to_dict())
+                if bill.technology_water_amount and bill.solid_alum_range_to and ((
+                                                         bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (
+                                                         bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from):
+                    over_solid_alum_consump.append(bill.to_dict())
+                if bill.technology_water_amount and bill.liquid_alum_range_to and ((
+                                                          bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
+                                                          bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from):
+                    over_liquid_alum_consump.append(bill.to_dict())
+                elif bill.technology_water_amount == 0 and bill.technology_power_consump > 1200:
+                    over_power_for_0_water.append(bill.to_dict())
         # query with group by station to compare with water capacity
         query = (
             db.session.query(
@@ -587,7 +589,8 @@ def home():
             over_chlorine_consump=over_chlorine_consump,
             over_solid_alum_consump=over_solid_alum_consump,
             over_liquid_alum_consump=over_liquid_alum_consump,
-            over_water_stations=over_water_bills_list
+            over_water_stations=over_water_bills_list,
+            over_power_for_0_water=over_power_for_0_water,
         )
 
     return jsonify({"message": "برجاء تسجيل الفواتير لمتابعة الاستهلاكات السنوية"})
@@ -1160,6 +1163,19 @@ def add_new_bill(account_number, current_user):
                     "success": "تم إضافة الفاتورة بنجاح"
                 }
             }
+            # import requests
+            # FCM_SERVER_KEY = "YOUR_FCM_KEY"
+            #
+            # def send_push(token, title, body):
+            #     headers = {
+            #         'Authorization': 'key=' + FCM_SERVER_KEY,
+            #         'Content-Type': 'application/json'
+            #     }
+            #     payload = {
+            #         'to': token,
+            #         'notification': {'title': title, 'body': body}
+            #     }
+            #     requests.post('https://fcm.googleapis.com/fcm/send', headers=headers, json=payload)
             return jsonify(response), 200
     return jsonify(gauge_sgt_list=gauge_sgt_list)  #, show_percent=show_percent
 
