@@ -100,13 +100,19 @@ class Gauge(db.Model):
         data['voltage_cost'] = self.voltage.voltage_cost if self.voltage else None
         data['fixed_fee'] = self.voltage.fixed_fee if self.voltage else None
         # Since all related stations belong to the same branch
-        branch = None
-        if self.station_techs:
-            first_sgt = next((sgt for sgt in self.station_techs if sgt.station and sgt.station.branch), None)
-            if first_sgt:
-                branch = first_sgt.station.branch.branch_name
+        branch_name = None
+        station_set = set()
+        for sgt in self.station_techs:
+            if sgt.station:
+                station_set.add(sgt.station.station_name)
 
-        data['branch_name'] = branch
+                # Get branch name once
+                if not branch_name and sgt.station.branch:
+                    branch_name = sgt.station.branch.branch_name
+
+        data['station_names'] = ", ".join(station_set) if station_set else None
+        data['station_names_list'] = list(station_set) if station_set else None
+        data['branch_name'] = branch_name
         return data
 
 
@@ -167,6 +173,7 @@ class StationGaugeTechnology(db.Model):
         data['branch_name'] = self.station.branch.branch_name if self.station else None
         return data
 
+
 class GuageBill(db.Model):
     __tablename__ = 'guage_bill'
     guage_bill_id = db.Column(Integer, unique=True, nullable=False, autoincrement=True, server_default=db.FetchedValue())
@@ -209,6 +216,18 @@ class GuageBill(db.Model):
             result[col.name] = val
 
         result['voltage_type'] = self.voltage.voltage_type if self.voltage else None
+        branch_name = None
+        station_set = set()
+        for sgt in self.guage.station_techs:
+            station_set.add(sgt.station.station_name)
+
+            # Get branch name once
+            if not branch_name:
+                branch_name = sgt.station.branch.branch_name
+
+        result['station_names'] = ", ".join(station_set) if station_set else None
+        result['station_names_list'] = list(station_set) if station_set else None
+        result['branch_name'] = branch_name
         return result
 
 

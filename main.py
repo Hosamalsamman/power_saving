@@ -516,7 +516,7 @@ def home():
             current_month = 12
             current_year -= 1
         current_month_bills = db.session.query(TechnologyBill).filter(
-            TechnologyBill.bill_month == 8,
+            TechnologyBill.bill_month == 9,
             TechnologyBill.bill_year == current_year).all()
         over_power_consump = []
         over_chlorine_consump = []
@@ -1408,18 +1408,18 @@ def try_commit():
         return jsonify(response), 200
 
 
-
-@app.route("/edit-old-tech-bills/<int:station_id>/<int:technology_id>/<int:month>/<int:year>", methods=["GET", "POST"])
+@app.route("/edit-old-tech-bills/<int:tech_bill_id>", methods=["GET", "POST"])
 @private_route([1, 2])
-def edit_old_tech_bills(station_id, technology_id, month, year, current_user):
+def edit_old_tech_bills(tech_bill_id, current_user):
     if request.method == "POST":
         data = request.get_json()
         bill = db.session.query(TechnologyBill).filter(
-            TechnologyBill.station_id == station_id,
-            TechnologyBill.technology_id == technology_id,
-            TechnologyBill.bill_month == month,
-            TechnologyBill.bill_year == year
+            TechnologyBill.tech_bill_id == tech_bill_id
         ).first()
+        station_id = bill.station_id
+        technology_id = bill.technology_id
+        month = bill.bill_month
+        year = bill.bill_year
 
         bill.technology_chlorine_consump = data['technology_chlorine_consump']
         bill.technology_solid_alum_consump = data['technology_solid_alum_consump']
@@ -2791,6 +2791,14 @@ def delete_group_permission(group_id, permission_id, current_user):
             }
         }
         return jsonify(response), 200
+
+
+# @app.route("/test-delete", methods=["GET"])
+# def test_delete():
+#     test_tech = db.session.query(Technology).filter(Technology.technology_name == "test-delete").first()
+#     db.session.delete(test_tech)
+#     db.session.commit()
+#     return jsonify({"success": True})
 
 
 if __name__ == '__main__':
