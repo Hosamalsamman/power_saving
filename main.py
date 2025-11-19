@@ -1334,6 +1334,8 @@ def edit_tech_bill(tech_bill_id, current_user):
                     total_water_amount += this_bill.technology_water_amount
                 else:
                     should_calculate = False
+            if total_water_amount == 0:
+                should_calculate = False
             # calculate percent for each tech bill
             # apply for power and bill
             if should_calculate:
