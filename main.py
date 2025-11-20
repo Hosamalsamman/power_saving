@@ -1330,19 +1330,21 @@ def edit_tech_bill(tech_bill_id, current_user):
             should_calculate = True
             total_water_amount = 0
             for this_bill in related_bills:
-                if this_bill.technology_water_amount:
+                if this_bill.technology_water_amount != None:
                     total_water_amount += this_bill.technology_water_amount
                 else:
                     should_calculate = False
-            if total_water_amount == 0:
-                should_calculate = False
+
             # calculate percent for each tech bill
             # apply for power and bill
             if should_calculate:
                 for each_bill in related_bills:
-                    each_bill.technology_bill_percentage = float(Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * 100)
-                    each_bill.technology_power_consump = float(Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * Decimal(str(each_bill.technology_power_consump)))
-                    each_bill.technology_bill_total = float(Decimal(str(each_bill.technology_water_amount)) / Decimal(str(total_water_amount)) * Decimal(str(each_bill.technology_bill_total)))
+                    if total_water_amount == 0:
+                        each_bill.technology_bill_percentage = 100 / len(related_bills)
+                    else:
+                        each_bill.technology_bill_percentage = each_bill.technology_water_amount / total_water_amount * 100
+                    each_bill.technology_power_consump = each_bill.technology_bill_percentage * each_bill.technology_power_consump
+                    each_bill.technology_bill_total = Decimal(str(each_bill.technology_bill_percentage)) * each_bill.technology_bill_total
 
         # --- skip audit for the automatic updates
         g.skip_audit = True
@@ -1464,15 +1466,21 @@ def edit_old_tech_bills(tech_bill_id, current_user):
                     for rel_bill in tech_bills_related:
                         total_water += rel_bill.technology_water_amount
                         total_power += rel_bill.technology_power_consump
-                        total_bill += float(str(rel_bill.technology_bill_total))
+                        total_bill += rel_bill.technology_bill_total
 
                     # --- skip audit for the automatic updates
                     g.skip_audit = True
 
-                    for rel_bill in tech_bills_related:
-                        rel_bill.technology_bill_percentage = rel_bill.technology_water_amount / total_water
-                        rel_bill.technology_power_consump = total_power * (rel_bill.technology_water_amount / total_water)
-                        rel_bill.technology_bill_total = total_bill * (rel_bill.technology_water_amount / total_water)
+                    if total_water == 0:
+                        for rel_bill in tech_bills_related:
+                            rel_bill.technology_bill_percentage = 100 / len(tech_bills_related)
+                            rel_bill.technology_power_consump = total_power * rel_bill.technology_bill_percentage / 100
+                            rel_bill.technology_bill_total = total_bill * Decimal(str(rel_bill.technology_bill_percentage)) / 100
+                    else:
+                        for rel_bill in tech_bills_related:
+                            rel_bill.technology_bill_percentage = (rel_bill.technology_water_amount / total_water) * 100
+                            rel_bill.technology_power_consump = total_power * rel_bill.technology_bill_percentage / 100
+                            rel_bill.technology_bill_total = total_bill * Decimal(str(rel_bill.technology_bill_percentage)) / 100
 
                     try_commit()
 
