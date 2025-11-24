@@ -1,6 +1,7 @@
 import os
 from decimal import Decimal
 
+import numpy as np
 from flask import Flask, abort, jsonify, render_template, request, make_response, current_app, g, has_request_context, session as flask_session
 from sqlalchemy import and_, or_, not_, func, case, event, inspect
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, DataError
@@ -1425,9 +1426,9 @@ def edit_old_tech_bills(tech_bill_id, current_user):
         month = bill.bill_month
         year = bill.bill_year
 
-        bill.technology_chlorine_consump = data['technology_chlorine_consump']
-        bill.technology_solid_alum_consump = data['technology_solid_alum_consump']
-        bill.technology_liquid_alum_consump = data['technology_liquid_alum_consump']
+        bill.technology_chlorine_consump = data['technology_chlorine_consump'] * 1000
+        bill.technology_solid_alum_consump = data['technology_solid_alum_consump'] * 1000
+        bill.technology_liquid_alum_consump = data['technology_liquid_alum_consump'] * 1000
 
         if bill.technology_water_amount == data['technology_water_amount']:
             return try_commit()
@@ -1713,7 +1714,7 @@ def show_charts(station_id, tech_id):
 
     # power plot
     plt.figure(figsize=(12, 6), dpi=120)
-    plt.title(get_display(arabic_reshaper.reshape('منحنى تغير معامل القدرة عبر الزمن')), fontsize=18)
+    plt.title(get_display(arabic_reshaper.reshape('منحنى تغير الرقم المرجعي للكهرباء عبر الزمن')), fontsize=18)
     plt.xticks(fontsize=14, rotation=45)
     plt.yticks(fontsize=14)
     ax1 = plt.gca()  # get current axes
@@ -1729,11 +1730,11 @@ def show_charts(station_id, tech_id):
     ax1.plot(df_bills.date, (df_bills.technology_power_consump / df_bills.technology_water_amount), color='blue',
              linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('معامل القدرة الفعلي')))
     ax2.plot(df_bills.date, df_bills.power_per_water, 'green', linewidth=3, linestyle='dashed',
-             label=get_display(arabic_reshaper.reshape('معامل القدرة القياسي')))
+             label=get_display(arabic_reshaper.reshape('الرقم المرجعي القياسي')))
     ax1.grid(color='grey', linestyle='--')
     ax1.set_xlabel('شهر/سنة', fontsize=14)
-    ax1.set_ylabel(get_display(arabic_reshaper.reshape('معامل القدرة الفعلي')), color='blue', fontsize=14)
-    ax2.set_ylabel(get_display(arabic_reshaper.reshape('معامل القدرة القياسي')), color='green', fontsize=14)
+    ax1.set_ylabel(get_display(arabic_reshaper.reshape('الرقم المرجعي الفعلي')), color='blue', fontsize=14)
+    ax2.set_ylabel(get_display(arabic_reshaper.reshape('الرقم المرجعي القياسي')), color='green', fontsize=14)
     # ax1.set_xlim([df_bills.date.min(), df_bills.date.max()])
     # ax1.set_ylim([
     #     (df_bills.technology_power_consump / df_bills.technology_water_amount).min(),
@@ -1758,8 +1759,8 @@ def show_charts(station_id, tech_id):
 
     # Axis labels
     ax1.set_xlabel(get_display(arabic_reshaper.reshape('شهر/سنة')), fontsize=14)
-    ax1.set_ylabel(get_display(arabic_reshaper.reshape('معامل القدرة الفعلي')), fontsize=14, color='blue')
-    ax2.set_ylabel(get_display(arabic_reshaper.reshape('معامل القدرة القياسي')), fontsize=14, color='green')
+    ax1.set_ylabel(get_display(arabic_reshaper.reshape('الرقم المرجعي الفعلي')), fontsize=14, color='blue')
+    ax2.set_ylabel(get_display(arabic_reshaper.reshape('الرقم المرجعي القياسي')), fontsize=14, color='green')
 
     # Grid
     ax1.grid(color='grey', linestyle='--', alpha=0.5)
@@ -2066,71 +2067,102 @@ def new_annual_bill(meter_id, current_user):
     return jsonify({"response": "لا إله إلا الله وحده لا شريك له له الملك وله الحمد وهو على كل شيء قدير"})
 
 
-@app.route("/prediction/<station_id>")
+@app.route("/prediction/<station_id>", methods=["GET", "POST"])
 @private_route([1, 2])
 def predict(station_id, current_user):
-    station_bills = db.session.query(TechnologyBill).filter(
-        TechnologyBill.station_id == station_id,
-        TechnologyBill.technology_water_amount != None
-    ).all()
-    if not station_bills:
-        return jsonify({"error": "لا يوجد بيانات لهذه المحطة"}), 410
-    bills_list = [bill.to_dict() for bill in station_bills]
+    if request.method == "POST":
+        station_bills = db.session.query(TechnologyBill).filter(
+            TechnologyBill.station_id == station_id,
+            TechnologyBill.technology_water_amount != None
+        ).all()
+        if not station_bills:
+            print(f"station_bills: {station_bills}")
+            message = {"error": "لا يوجد بيانات لهذه المحطة"}
+            return jsonify(message), 404
+        bills_list = [bill.to_dict() for bill in station_bills]
 
-    df_bills = pd.DataFrame(bills_list)
-    df_year_bills = df_bills.groupby(['station_id', 'bill_year'], as_index=False).agg(
-        {'technology_water_amount': pd.Series.mean}
-    )
-    print(df_year_bills)
-    plt.figure(figsize=(8, 4), dpi=200)
-    with sns.axes_style("darkgrid"):
-        ax = sns.regplot(data=df_year_bills,
-                         x='bill_year',
-                         y='technology_water_amount',
-                         scatter_kws={'alpha': 0.4,
-                                      'color': '#2f4b7c'},
-                         line_kws={'color': '#ff7c43'})
-    ax.set(
-        ylabel=f'{get_display(arabic_reshaper.reshape('المياه المنتجة'))}',
-        xlabel=f'{get_display(arabic_reshaper.reshape('السنوات'))}',
-    )
-    # Save to BytesIO buffer
-    img = io.BytesIO()
-    plt.tight_layout()
-    plt.savefig(img, format='png', dpi=200, bbox_inches='tight')
-    img.seek(0)  # Rewind the buffer
+        df_bills = pd.DataFrame(bills_list)
+        df_monthly_bills = df_bills.groupby(['station_id', 'bill_year', 'bill_month'], as_index=False).agg(
+            {'technology_water_amount': pd.Series.sum}
+        )
+        df_monthly_bills["time_index"] = df_monthly_bills["bill_year"] * 12 + df_monthly_bills["bill_month"]
+        # ensure sorted numeric time order
+        df_monthly_bills = df_monthly_bills.sort_values(by="time_index")
 
-    # Encode image to Base64
-    prediction_base64 = base64.b64encode(img.read()).decode('utf-8')
+        print(df_monthly_bills)
+        plt.figure(figsize=(8, 4), dpi=200)
+        with sns.axes_style("darkgrid"):
+            ax = sns.regplot(data=df_monthly_bills,
+                             x='time_index',
+                             y='technology_water_amount',
+                             scatter_kws={'alpha': 0.4,
+                                          'color': '#2f4b7c'},
+                             line_kws={'color': '#ff7c43'})
+        ax.set(
+            ylabel=f'{get_display(arabic_reshaper.reshape('المياه المنتجة'))}',
+            xlabel=f'{get_display(arabic_reshaper.reshape('الفترة الزمنية'))}',
+        )
+        # Save to BytesIO buffer
+        img = io.BytesIO()
+        plt.tight_layout()
+        plt.savefig(img, format='png', dpi=200, bbox_inches='tight')
+        img.seek(0)  # Rewind the buffer
 
-    regression = LinearRegression()
+        # Encode image to Base64
+        prediction_base64 = base64.b64encode(img.read()).decode('utf-8')
 
-    # Explanatory Variable(s) or Feature(s)
-    X = pd.DataFrame(df_year_bills, columns=['bill_year'])
+        regression = LinearRegression()
 
-    # Response Variable or Target
-    y = pd.DataFrame(df_year_bills, columns=['technology_water_amount'])
+        # Explanatory Variable(s) or Feature(s)
+        X = pd.DataFrame(df_monthly_bills, columns=['time_index'])
 
-    # Find the best-fit line
-    regression.fit(X, y)
+        # Response Variable or Target
+        y = pd.DataFrame(df_monthly_bills, columns=['technology_water_amount'])
 
-    # theta zero
-    print(f"The intercept is: {regression.intercept_[0]}")
-    # theta one
-    print(f"The slope coeficient is: {regression.coef_[0]}")
+        # Find the best-fit line
+        regression.fit(X, y)
 
-    # R-squared
-    points_represented = regression.score(X, y)
+        # theta zero
+        print(f"The intercept is: {regression.intercept_[0]}")
+        # theta one
+        print(f"The slope coeficient is: {regression.coef_[0]}")
 
-    max_water_amount = station_bills[0].station.station_water_capacity * 30
-    expected_year = (max_water_amount - regression.intercept_[0]) / regression.coef_[0, 0]
-    result = {
-        "prediction_plot": prediction_base64,
-        "water_capacity": max_water_amount,
-        "represented_points": points_represented * 100,
-        "expected_year": expected_year
-    }
-    return jsonify(result)
+        # R-squared
+        points_represented = regression.score(X, y)
+
+        max_water_amount = station_bills[0].station.station_water_capacity * 30
+        predicted_time_index = (max_water_amount - regression.intercept_[0]) / regression.coef_[0, 0]
+        # ------ FIX: if prediction is impossible ------
+        if pd.isna(predicted_time_index) or np.isinf(predicted_time_index):
+            return jsonify({
+                "error": "لا يمكن حساب التوقع. البيانات لا تُظهر أي تغيير عبر الشهور."
+            }), 400
+
+        # slope is zero → no trend
+        if regression.coef_[0, 0] == 0:
+            return jsonify({
+                "error": "لا يمكن حساب التوقع لأن بيانات المحطة ثابتة ولا يوجد اتجاه صاعد."
+            }), 406
+
+        # negative prediction → meaningless
+        if predicted_time_index < df_monthly_bills["time_index"].min():
+            return jsonify({
+                "error": "القيمة المتوقعة أقل من البيانات المتوفرة، مما يجعل التوقع غير منطقي."
+            }), 407
+        predicted_year = int(predicted_time_index // 12)
+        predicted_month = int(predicted_time_index % 12)
+        if predicted_month == 0:
+            predicted_month = 12
+            predicted_year -= 1
+        result = {
+            "prediction_plot": prediction_base64,
+            "water_capacity": max_water_amount,
+            "represented_points": points_represented * 100,
+            "expected_year": f"{predicted_month}/{predicted_year}"
+        }
+        print(result)
+        return jsonify(result), 200
+    return jsonify({"response": "لا حول ولا قوة إلا بالله"})
 
 
 @app.route("/reports", methods=["GET", "POST"])
@@ -2392,13 +2424,7 @@ def show_reports(current_user):
         elif data['report_name'] == "bills":
             query = (
                 db.session.query(
-                    GuageBill.bill_year,
-                    GuageBill.bill_month,
-                    GuageBill.account_number,
-                    GuageBill.bill_total,
-                    GuageBill.is_paid,
-                    GuageBill.delay_month,
-                    GuageBill.delay_year,
+                    GuageBill
                 )
                 .filter(
                     (GuageBill.bill_year * 100 + GuageBill.bill_month)
@@ -2414,6 +2440,7 @@ def show_reports(current_user):
                     "is_paid": b.is_paid,
                     "delay_month": b.delay_month,
                     "delay_year": b.delay_year,
+                    "station_names": b.to_dict()["station_names"],
                 }
                 for b in bills
             ]
