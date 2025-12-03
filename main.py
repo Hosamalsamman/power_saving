@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import matplotlib
 import json
+import plotly.express as px
 
 matplotlib.use("Agg")  # ← force headless, non‑GUI backend
 import matplotlib.pyplot as plt
@@ -578,6 +579,51 @@ def home():
             } for bill in bills
         ]
 
+        query = db.session.query(
+            Branch.branch_name,
+            Station.station_name,
+            Technology.technology_name,
+            TechnologyBill.technology_bill_total,
+            TechnologyBill.technology_water_amount,
+            TechnologyBill.technology_power_consump,
+            TechnologyBill.technology_chlorine_consump,
+            TechnologyBill.technology_liquid_alum_consump,
+            TechnologyBill.technology_solid_alum_consump,
+        )
+        # Complex date range across years
+        query = query.filter(
+            TechnologyBill.bill_year == 2025,
+            Station.station_type == "مياة"
+        )
+        query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
+        query = query.join(TechnologyBill.technology)
+        query = query.join(TechnologyBill.station)
+        query = query.join(Station.branch)
+        bills = query.all()
+
+        df = pd.DataFrame(bills)
+        # Create sunburst
+        fig = px.sunburst(df,
+                          path=['branch_name', 'station_name', 'technology_name'],
+                          values='technology_water_amount',
+                          color='technology_name',
+                          labels={
+                              'technology_water_amount': 'كمية المياه بالمتر المكعب',
+                              'technology_name': 'نوع التقنية'
+                          }
+                          )
+
+        fig.update_layout(
+            font=dict(family="Arial, Helvetica, sans-serif", size=14)
+        )
+
+        fig.update_layout(autosize=True,
+                          height=900,  # ← increase height
+                          coloraxis_showscale=False)
+
+        # Convert to JSON (VERY IMPORTANT)
+        fig_json = fig.to_html()
+
         return jsonify(
             power=totals['power'],
             water=totals['water'],
@@ -586,6 +632,7 @@ def home():
             chlorine=totals['chlorine'],
             solid_alum=totals['solid_alum'],
             liquid_alum=totals['liquid_alum'],
+            water_chart=fig_json,
             over_power_consump=over_power_consump,
             over_chlorine_consump=over_chlorine_consump,
             over_solid_alum_consump=over_solid_alum_consump,
@@ -792,7 +839,7 @@ def add_new_tech(current_user):
 def gauges(current_user):
     all_gauges = db.session.query(Gauge).all()
     gauges_list = [gauge.to_dict() for gauge in all_gauges]
-    print(gauges_list)
+    # print(gauges_list)
 
     return jsonify(gauges_list)
 
@@ -1728,7 +1775,7 @@ def show_charts(station_id, tech_id):
     )
 
     ax1.plot(df_bills.date, (df_bills.technology_power_consump / df_bills.technology_water_amount), color='blue',
-             linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('معامل القدرة الفعلي')))
+             linewidth=3, marker="o", label=get_display(arabic_reshaper.reshape('الرقم المرجعي الفعلي')))
     ax2.plot(df_bills.date, df_bills.power_per_water, 'green', linewidth=3, linestyle='dashed',
              label=get_display(arabic_reshaper.reshape('الرقم المرجعي القياسي')))
     ax1.grid(color='grey', linestyle='--')
@@ -1996,6 +2043,11 @@ def show_charts(station_id, tech_id):
     )
 
 
+@app.route("/finantial-analysis", methods=['GET', 'POST'])
+def finantial_analysis():
+    pass
+
+
 @app.route("/annual-bills")
 @private_route([1, 3])
 def show_annual_bills(current_user):
@@ -2089,7 +2141,7 @@ def predict(station_id, current_user):
         # ensure sorted numeric time order
         df_monthly_bills = df_monthly_bills.sort_values(by="time_index")
 
-        print(df_monthly_bills)
+        # print(df_monthly_bills)
         plt.figure(figsize=(8, 4), dpi=200)
         with sns.axes_style("darkgrid"):
             ax = sns.regplot(data=df_monthly_bills,
@@ -2160,7 +2212,7 @@ def predict(station_id, current_user):
             "represented_points": points_represented * 100,
             "expected_year": f"{predicted_month}/{predicted_year}"
         }
-        print(result)
+        # print(result)
         return jsonify(result), 200
     return jsonify({"response": "لا حول ولا قوة إلا بالله"})
 
@@ -2384,7 +2436,7 @@ def show_reports(current_user):
                     "total_water": float(bill.total_water) if bill.total_water else 0,
                     "total_power": float(bill.total_power) if bill.total_power else 0,
                     "total_bill": float(bill.total_bill) if bill.total_bill else 0,
-                    "percent": "{:.2f}".format(float(bill.total_bill) / float(bill.total_power)) if bill.total_power else "0.00",
+                    "percent": "{:.2f}".format(float(bill.total_power) / float(bill.total_water)) if bill.total_water else "0.00",
                 } for bill in bills
             ]
             print(bills_list)
@@ -2416,7 +2468,7 @@ def show_reports(current_user):
                     "total_water": float(bill.total_water) if bill.total_water else 0,
                     "total_power": float(bill.total_power) if bill.total_power else 0,
                     "total_bill": float(bill.total_bill) if bill.total_bill else 0,
-                    "percent": "{:.2f}".format(float(bill.total_bill) / float(bill.total_power)) if bill.total_power else "0.00",
+                    "percent": "{:.2f}".format(float(bill.total_power) / float(bill.total_water)) if bill.total_water else "0.00",
                 } for bill in bills
             ]
             print(bills_list)
@@ -2836,6 +2888,51 @@ def delete_group_permission(group_id, permission_id, current_user):
 #     db.session.delete(test_tech)
 #     db.session.commit()
 #     return jsonify({"success": True})
+
+
+@app.route("/test-sunburst")
+def test_sunburst():
+    query = db.session.query(
+        Branch.branch_name,
+        Station.station_name,
+        Technology.technology_name,
+        TechnologyBill.technology_bill_total,
+        TechnologyBill.technology_water_amount,
+        TechnologyBill.technology_power_consump,
+        TechnologyBill.technology_chlorine_consump,
+        TechnologyBill.technology_liquid_alum_consump,
+        TechnologyBill.technology_solid_alum_consump,
+    )
+    # Complex date range across years
+    query = query.filter(
+        TechnologyBill.bill_year == 2025,
+        Station.station_type == "مياة"
+    )
+    query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
+    query = query.join(TechnologyBill.technology)
+    query = query.join(TechnologyBill.station)
+    query = query.join(Station.branch)
+    bills = query.all()
+
+    df = pd.DataFrame(bills)
+    # Create sunburst
+    fig = px.sunburst(df,
+                      path=['branch_name', 'station_name', 'technology_name'],
+                      values='technology_water_amount',
+                      color='technology_name',
+                      title='نسبة تركيز انتاج المياه'
+                      )
+
+    fig.update_layout(xaxis_title='نوع المرشح',
+                      yaxis_title='المحطة',
+                      coloraxis_showscale=False)
+
+    # Convert to JSON (VERY IMPORTANT)
+    fig_json = fig.to_json()
+    print(fig_json)
+    fig.show()
+
+    return jsonify({"chart": fig_json})
 
 
 if __name__ == '__main__':

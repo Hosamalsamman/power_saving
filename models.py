@@ -103,7 +103,7 @@ class Gauge(db.Model):
         branch_name = None
         station_set = set()
         for sgt in self.station_techs:
-            if sgt.station:
+            if sgt.station and sgt.relation_status:
                 station_set.add(sgt.station.station_name)
 
                 # Get branch name once
@@ -219,7 +219,8 @@ class GuageBill(db.Model):
         branch_name = None
         station_set = set()
         for sgt in self.guage.station_techs:
-            station_set.add(sgt.station.station_name)
+            if sgt.relation_status:
+                station_set.add(sgt.station.station_name)
 
             # Get branch name once
             if not branch_name:
