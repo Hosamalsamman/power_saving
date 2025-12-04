@@ -30,6 +30,7 @@ from sklearn.linear_model import LinearRegression
 import pyodbc
 from flask_migrate import Migrate  # Add this import
 from sqlalchemy import text
+import plotly.graph_objects as go
 
 # import secrets
 #
@@ -579,50 +580,262 @@ def home():
             } for bill in bills
         ]
 
-        query = db.session.query(
-            Branch.branch_name,
-            Station.station_name,
-            Technology.technology_name,
-            TechnologyBill.technology_bill_total,
-            TechnologyBill.technology_water_amount,
-            TechnologyBill.technology_power_consump,
-            TechnologyBill.technology_chlorine_consump,
-            TechnologyBill.technology_liquid_alum_consump,
-            TechnologyBill.technology_solid_alum_consump,
-        )
-        # Complex date range across years
-        query = query.filter(
-            TechnologyBill.bill_year == 2025,
-            Station.station_type == "مياة"
-        )
-        query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
-        query = query.join(TechnologyBill.technology)
-        query = query.join(TechnologyBill.station)
-        query = query.join(Station.branch)
-        bills = query.all()
+        def arabic_number(value):
+            if value >= 1_000_000_000:
+                return f"{value / 1_000_000_000:.1f} مليار"
+            elif value >= 1_000_000:
+                return f"{value / 1_000_000:.1f} مليون"
+            elif value >= 1_000:
+                return f"{value / 1000:.1f} ألف"
+            else:
+                return f"{value:,.0f}"
 
-        df = pd.DataFrame(bills)
-        # Create sunburst
-        fig = px.sunburst(df,
-                          path=['branch_name', 'station_name', 'technology_name'],
-                          values='technology_water_amount',
-                          color='technology_name',
-                          labels={
-                              'technology_water_amount': 'كمية المياه بالمتر المكعب',
-                              'technology_name': 'نوع التقنية'
-                          }
-                          )
+        def sunburst_charts():
+            query = db.session.query(
+                Branch.branch_name,
+                Station.station_name,
+                Technology.technology_name,
+                TechnologyBill.technology_water_amount,
+                TechnologyBill.technology_power_consump,
+                TechnologyBill.technology_chlorine_consump,
+                TechnologyBill.technology_liquid_alum_consump,
+                TechnologyBill.technology_solid_alum_consump,
+            )
+            query = query.filter(
+                TechnologyBill.bill_year == 2025,
+                Station.station_type == "مياة"
+            )
+            query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
+            query = query.join(TechnologyBill.technology)
+            query = query.join(TechnologyBill.station)
+            query = query.join(Station.branch)
 
-        fig.update_layout(
-            font=dict(family="Arial, Helvetica, sans-serif", size=14)
-        )
+            bills = query.all()
+            df = pd.DataFrame(bills)
 
-        fig.update_layout(autosize=True,
-                          height=900,  # ← increase height
-                          coloraxis_showscale=False)
+            total_water = df['technology_water_amount'].sum()
+            total_power = df['technology_power_consump'].sum()
+            total_chlorine = df['technology_chlorine_consump'].sum()
+            total_liquid_alum = df['technology_liquid_alum_consump'].sum()
+            total_solid_alum = df['technology_solid_alum_consump'].sum()
 
-        # Convert to JSON (VERY IMPORTANT)
-        fig_json = fig.to_html()
+            # Chart 1: Water Production
+            fig_water = px.sunburst(
+                df,
+                path=['branch_name', 'station_name', 'technology_name'],
+                values='technology_water_amount',
+                color='technology_name',
+                title='نسبة إنتاج المياه حسب الفرع والمحطة والتقنية'
+            )
+            fig_water.update_traces(
+                hovertemplate="<b>%{label}</b><br><br>كمية المياه: %{value:,.0f} م³<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+            )
+            fig_water.update_layout(
+                height=850,
+                font=dict(family="Arial", size=15),
+                coloraxis_showscale=False,
+                margin=dict(t=60, b=40, l=40, r=40)
+            )
+
+            # Chart 2: Power Consumption
+            fig_power = px.sunburst(
+                df,
+                path=['branch_name', 'station_name', 'technology_name'],
+                values='technology_power_consump',
+                color='technology_name',
+                title='نسبة استهلاك الكهرباء حسب الفرع والمحطة والتقنية'
+            )
+            fig_power.update_traces(
+                hovertemplate="<b>%{label}</b><br><br>استهلاك الكهرباء: %{value:,.0f} ك.و<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+            )
+            fig_power.update_layout(
+                height=850,
+                font=dict(family="Arial", size=15),
+                coloraxis_showscale=False,
+                margin=dict(t=60, b=40, l=40, r=40)
+            )
+
+            # Chart 3: Chlorine Consumption
+            fig_chlorine = px.sunburst(
+                df,
+                path=['branch_name', 'station_name', 'technology_name'],
+                values='technology_chlorine_consump',
+                color='technology_name',
+                title='نسبة استهلاك الكلور حسب الفرع والمحطة والتقنية'
+            )
+            fig_chlorine.update_traces(
+                hovertemplate="<b>%{label}</b><br><br>كمية الكلور: %{value:,.0f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+            )
+            fig_chlorine.update_layout(
+                height=850,
+                font=dict(family="Arial", size=15),
+                coloraxis_showscale=False,
+                margin=dict(t=60, b=40, l=40, r=40)
+            )
+
+            # Chart 4: Liquid Alum Consumption
+            fig_liquid = px.sunburst(
+                df,
+                path=['branch_name', 'station_name', 'technology_name'],
+                values='technology_liquid_alum_consump',
+                color='technology_name',
+                title='نسبة استهلاك الشبة السائلة حسب الفرع والمحطة والتقنية'
+            )
+            fig_liquid.update_traces(
+                hovertemplate="<b>%{label}</b><br><br>الشبة السائلة: %{value:,.0f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+            )
+            fig_liquid.update_layout(
+                height=850,
+                font=dict(family="Arial", size=15),
+                coloraxis_showscale=False,
+                margin=dict(t=60, b=40, l=40, r=40)
+            )
+
+            # Chart 5: Solid Alum Consumption
+            fig_solid = px.sunburst(
+                df,
+                path=['branch_name', 'station_name', 'technology_name'],
+                values='technology_solid_alum_consump',
+                color='technology_name',
+                title='نسبة استهلاك الشبة الصلبة حسب الفرع والمحطة والتقنية'
+            )
+            fig_solid.update_traces(
+                hovertemplate="<b>%{label}</b><br><br>الشبة الصلبة: %{value:,.0f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+            )
+            fig_solid.update_layout(
+                height=850,
+                font=dict(family="Arial", size=15),
+                coloraxis_showscale=False,
+                margin=dict(t=60, b=40, l=40, r=40)
+            )
+
+            # OR if you need HTML:
+            # return {
+            #     'sun_water': fig_water.to_html(full_html=False, include_plotlyjs=False),
+            #     'sun_power': fig_power.to_html(full_html=False, include_plotlyjs=False),
+            #     'sun_chlorine': fig_chlorine.to_html(full_html=False, include_plotlyjs=False),
+            #     'sun_liquid': fig_liquid.to_html(full_html=False, include_plotlyjs=False),
+            #     'sun_solid': fig_solid.to_html(full_html=False, include_plotlyjs=False)
+            # }
+            kpi_cards = f"""
+            <div class="row text-center" style="margin-top: 20px; margin-bottom: 20px;">
+    
+                <div class="col-md-2">
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h6 class="text-secondary">إجمالي المياه</h6>
+                            <h4 class="text-primary">{arabic_number(total_water)}</h4>
+                        </div>
+                    </div>
+                </div>
+    
+                <div class="col-md-2">
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h6 class="text-secondary">إجمالي الكهرباء</h6>
+                            <h4 class="text-primary">{arabic_number(total_power)}</h4>
+                        </div>
+                    </div>
+                </div>
+    
+                <div class="col-md-2">
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h6 class="text-secondary">إجمالي الكلور</h6>
+                            <h4 class="text-primary">{arabic_number(total_chlorine / 1_000_000)} طن</h4>
+                        </div>
+                    </div>
+                </div>
+    
+                <div class="col-md-3">
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h6 class="text-secondary">إجمالي الشبة السائلة</h6>
+                            <h4 class="text-primary">{arabic_number(total_liquid_alum / 1_000_000)} طن</h4>
+                        </div>
+                    </div>
+                </div>
+    
+                <div class="col-md-3">
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h6 class="text-secondary">إجمالي الشبة الصلبة</h6>
+                            <h4 class="text-primary">{arabic_number(total_solid_alum / 1_000_000)} طن</h4>
+                        </div>
+                    </div>
+                </div>
+    
+            </div>
+            """
+
+            tabs_html = f"""
+            <ul class="nav nav-tabs" id="dataTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#water" type="button">المياه</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#power" type="button">الكهرباء</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#chlorine" type="button">الكلور</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#liquid" type="button">الشبة السائلة</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#solid" type="button">الشبة الصلبة</button>
+              </li>
+            </ul>
+    
+            <div class="tab-content" style="margin-top: 20px;">
+              <div class="tab-pane fade show active" id="water">{fig_water.to_html()}</div>
+              <div class="tab-pane fade" id="power">{fig_power.to_html()}</div>
+              <div class="tab-pane fade" id="chlorine">{fig_chlorine.to_html()}</div>
+              <div class="tab-pane fade" id="liquid">{fig_liquid.to_html()}</div>
+              <div class="tab-pane fade" id="solid">{fig_solid.to_html()}</div>
+            </div>
+            """
+
+            full_dashboard_html = f"""
+            <html lang="ar" dir="rtl">
+            <head>
+                <meta charset="UTF-8">
+                <title>Dashboard</title>
+    
+                <!-- Bootstrap -->
+                <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+                <!-- Plotly -->
+                <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    
+                <style>
+                    body {{
+                        background-color: #f8f9fa;
+                        font-family: 'Arial';
+                    }}
+                </style>
+            </head>
+    
+            <body>
+    
+            <div class="container">
+    
+                <h2 class="text-center mt-4 mb-4 text-primary">
+                    لوحة تحليل استهلاك وإنتاج المحطات
+                </h2>
+    
+                {kpi_cards}
+    
+                {tabs_html}
+    
+            </div>
+    
+            <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+            </body>
+            </html>
+            """
+            return full_dashboard_html
 
         return jsonify(
             power=totals['power'],
@@ -632,7 +845,7 @@ def home():
             chlorine=totals['chlorine'],
             solid_alum=totals['solid_alum'],
             liquid_alum=totals['liquid_alum'],
-            water_chart=fig_json,
+            water_chart=sunburst_charts(),
             over_power_consump=over_power_consump,
             over_chlorine_consump=over_chlorine_consump,
             over_solid_alum_consump=over_solid_alum_consump,
@@ -1294,7 +1507,7 @@ def show_null_tech_bills(current_user):
         TechnologyBill.technology_water_amount == None
     ).all()
     tech_bills_list = [t_b.to_dict() for t_b in all_tech_bills]
-    print(tech_bills_list)
+    # print(tech_bills_list)
     return jsonify(tech_bills_list)
 
 
@@ -2267,7 +2480,7 @@ def show_reports(current_user):
 
                 } for bill in bills
             ]
-            print(bills_list)
+            # print(bills_list)
             return jsonify(bills_list)
         elif data['report_name'] == "branch_total":
             # Use parentheses instead of backslashes
@@ -2303,7 +2516,7 @@ def show_reports(current_user):
 
                 } for bill in bills
             ]
-            print(bills_list)
+            # print(bills_list)
             return jsonify(bills_list)
         elif data['report_name'] == "technology_per_month":
             query = db.session.query(
@@ -2341,7 +2554,7 @@ def show_reports(current_user):
                     "total_solid_alum": float(bill.total_solid_alum) if bill.total_solid_alum else 0,
                 } for bill in bills
             ]
-            print(bills_list)
+            # print(bills_list)
             return jsonify(bills_list)
         elif data['report_name'] == "technology_total":
             query = db.session.query(
@@ -2374,7 +2587,7 @@ def show_reports(current_user):
                     "total_solid_alum": float(bill.total_solid_alum) if bill.total_solid_alum else 0,
                 } for bill in bills
             ]
-            print(bills_list)
+            # print(bills_list)
             return jsonify(bills_list)
 
         # elif current_user.group_id == 1 or current_user.group_id == 3:  # Administrators or Power-saving
@@ -2408,7 +2621,7 @@ def show_reports(current_user):
                     "total_bill": float(bill.total_bill) if bill.total_bill else 0,
                 } for bill in bills
             ]
-            print(station_bills_list)
+            # print(station_bills_list)
             return jsonify(station_bills_list)
         elif data['report_name'] == "water-techs-3-month":
             query = (
@@ -2436,10 +2649,10 @@ def show_reports(current_user):
                     "total_water": float(bill.total_water) if bill.total_water else 0,
                     "total_power": float(bill.total_power) if bill.total_power else 0,
                     "total_bill": float(bill.total_bill) if bill.total_bill else 0,
-                    "percent": "{:.2f}".format(float(bill.total_power) / float(bill.total_water)) if bill.total_water else "0.00",
+                    "percent": "{:.2f}".format(float(bill.total_bill) / float(bill.total_power)) if bill.total_power else "0.00",
                 } for bill in bills
             ]
-            print(bills_list)
+            # print(bills_list)
             return jsonify(bills_list)
 
         elif data['report_name'] == "sanity-techs-3-month":
@@ -2468,10 +2681,10 @@ def show_reports(current_user):
                     "total_water": float(bill.total_water) if bill.total_water else 0,
                     "total_power": float(bill.total_power) if bill.total_power else 0,
                     "total_bill": float(bill.total_bill) if bill.total_bill else 0,
-                    "percent": "{:.2f}".format(float(bill.total_power) / float(bill.total_water)) if bill.total_water else "0.00",
+                    "percent": "{:.2f}".format(float(bill.total_bill) / float(bill.total_power)) if bill.total_power else "0.00",
                 } for bill in bills
             ]
-            print(bills_list)
+            # print(bills_list)
             return jsonify(bills_list)
         elif data['report_name'] == "bills":
             query = (
@@ -2496,7 +2709,7 @@ def show_reports(current_user):
                 }
                 for b in bills
             ]
-            print(bills_list)
+            # print(bills_list)
             return jsonify(bills_list)
     return jsonify({"response": "سبحان الله وبحمده"})   # current_user.group.to_dict()
 
