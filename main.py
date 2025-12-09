@@ -613,6 +613,15 @@ def home():
             bills = query.all()
             df = pd.DataFrame(bills)
 
+            # Convert chlorine from grams → tons
+            df['technology_chlorine_consump'] = df['technology_chlorine_consump'] / 1_000_000
+
+            # Convert liquid alum from grams → tons (if needed)
+            df['technology_liquid_alum_consump'] = df['technology_liquid_alum_consump'] / 1_000_000
+
+            # Convert solid alum from grams → tons (if needed)
+            df['technology_solid_alum_consump'] = df['technology_solid_alum_consump'] / 1_000_000
+
             total_water = df['technology_water_amount'].sum()
             total_power = df['technology_power_consump'].sum()
             total_chlorine = df['technology_chlorine_consump'].sum()
@@ -664,7 +673,7 @@ def home():
                 title='نسبة استهلاك الكلور حسب الفرع والمحطة والتقنية'
             )
             fig_chlorine.update_traces(
-                hovertemplate="<b>%{label}</b><br><br>كمية الكلور: %{value:,.0f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+                hovertemplate="<b>%{label}</b><br><br>كمية الكلور: %{value:,.3f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
             )
             fig_chlorine.update_layout(
                 height=850,
@@ -682,7 +691,7 @@ def home():
                 title='نسبة استهلاك الشبة السائلة حسب الفرع والمحطة والتقنية'
             )
             fig_liquid.update_traces(
-                hovertemplate="<b>%{label}</b><br><br>الشبة السائلة: %{value:,.0f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+                hovertemplate="<b>%{label}</b><br><br>الشبة السائلة: %{value:,.3f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
             )
             fig_liquid.update_layout(
                 height=850,
@@ -700,7 +709,7 @@ def home():
                 title='نسبة استهلاك الشبة الصلبة حسب الفرع والمحطة والتقنية'
             )
             fig_solid.update_traces(
-                hovertemplate="<b>%{label}</b><br><br>الشبة الصلبة: %{value:,.0f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+                hovertemplate="<b>%{label}</b><br><br>الشبة الصلبة: %{value:,.3f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
             )
             fig_solid.update_layout(
                 height=850,
@@ -724,7 +733,7 @@ def home():
                     <div class="card shadow-sm">
                         <div class="card-body">
                             <h6 class="text-secondary">إجمالي المياه</h6>
-                            <h4 class="text-primary">{arabic_number(total_water)}</h4>
+                            <h4 class="text-primary">{arabic_number(total_water)} (م³)</h4>
                         </div>
                     </div>
                 </div>
@@ -733,7 +742,7 @@ def home():
                     <div class="card shadow-sm">
                         <div class="card-body">
                             <h6 class="text-secondary">إجمالي الكهرباء</h6>
-                            <h4 class="text-primary">{arabic_number(total_power)}</h4>
+                            <h4 class="text-primary">{arabic_number(total_power)} (KW)</h4>
                         </div>
                     </div>
                 </div>
@@ -742,7 +751,7 @@ def home():
                     <div class="card shadow-sm">
                         <div class="card-body">
                             <h6 class="text-secondary">إجمالي الكلور</h6>
-                            <h4 class="text-primary">{arabic_number(total_chlorine / 1_000_000)} طن</h4>
+                            <h4 class="text-primary">{arabic_number(total_chlorine)} طن</h4>
                         </div>
                     </div>
                 </div>
@@ -751,7 +760,7 @@ def home():
                     <div class="card shadow-sm">
                         <div class="card-body">
                             <h6 class="text-secondary">إجمالي الشبة السائلة</h6>
-                            <h4 class="text-primary">{arabic_number(total_liquid_alum / 1_000_000)} طن</h4>
+                            <h4 class="text-primary">{arabic_number(total_liquid_alum)} طن</h4>
                         </div>
                     </div>
                 </div>
@@ -760,7 +769,7 @@ def home():
                     <div class="card shadow-sm">
                         <div class="card-body">
                             <h6 class="text-secondary">إجمالي الشبة الصلبة</h6>
-                            <h4 class="text-primary">{arabic_number(total_solid_alum / 1_000_000)} طن</h4>
+                            <h4 class="text-primary">{arabic_number(total_solid_alum)} طن</h4>
                         </div>
                     </div>
                 </div>
@@ -786,13 +795,13 @@ def home():
                 <button class="nav-link" data-bs-toggle="tab" data-bs-target="#solid" type="button">الشبة الصلبة</button>
               </li>
             </ul>
-    
+
             <div class="tab-content" style="margin-top: 20px;">
-              <div class="tab-pane fade show active" id="water">{fig_water.to_html()}</div>
-              <div class="tab-pane fade" id="power">{fig_power.to_html()}</div>
-              <div class="tab-pane fade" id="chlorine">{fig_chlorine.to_html()}</div>
-              <div class="tab-pane fade" id="liquid">{fig_liquid.to_html()}</div>
-              <div class="tab-pane fade" id="solid">{fig_solid.to_html()}</div>
+              <div class="tab-pane fade show active" id="water">{fig_water.to_html(full_html=False, include_plotlyjs='cdn')}</div>
+              <div class="tab-pane fade" id="power">{fig_power.to_html(full_html=False, include_plotlyjs=False)}</div>
+              <div class="tab-pane fade" id="chlorine">{fig_chlorine.to_html(full_html=False, include_plotlyjs=False)}</div>
+              <div class="tab-pane fade" id="liquid">{fig_liquid.to_html(full_html=False, include_plotlyjs=False)}</div>
+              <div class="tab-pane fade" id="solid">{fig_solid.to_html(full_html=False, include_plotlyjs=False)}</div>
             </div>
             """
 
@@ -801,13 +810,10 @@ def home():
             <head>
                 <meta charset="UTF-8">
                 <title>Dashboard</title>
-    
+
                 <!-- Bootstrap -->
                 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    
-                <!-- Plotly -->
-                <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-    
+
                 <style>
                     body {{
                         background-color: #f8f9fa;
@@ -815,23 +821,23 @@ def home():
                     }}
                 </style>
             </head>
-    
+
             <body>
-    
+
             <div class="container">
-    
+
                 <h2 class="text-center mt-4 mb-4 text-primary">
                     لوحة تحليل استهلاك وإنتاج المحطات
                 </h2>
-    
+
                 {kpi_cards}
-    
+
                 {tabs_html}
-    
+
             </div>
-    
+
             <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    
+
             </body>
             </html>
             """

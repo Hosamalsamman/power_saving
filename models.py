@@ -17,6 +17,7 @@ class Branch(db.Model):
     branch_name = db.Column(NVARCHAR(200), unique=True, nullable=False)
 
     stations = db.relationship('Station', back_populates='branch')
+    places = db.relationship('Place', back_populates='branch')
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -54,8 +55,11 @@ class Station(db.Model):
     station_type = db.Column(NVARCHAR(10), nullable=False)
     station_water_capacity = db.Column(Integer, nullable=False)
     water_source_id = db.Column(Integer, db.ForeignKey('water_source.water_source_id'), nullable=False)
+    # TODO: should modify it to false after filling stations with it's area
+    area_id = db.Column(Integer, db.ForeignKey('area_of_service.area_id'), nullable=True)
 
     branch = db.relationship('Branch', back_populates='stations')
+    area = db.relationship('AreaOfService', back_populates='stations')
     water_source = db.relationship('WaterSource', back_populates='stations')
     station_techs = db.relationship('StationGaugeTechnology', back_populates='station')
     technology_bills = db.relationship('TechnologyBill', back_populates='station')
@@ -315,6 +319,96 @@ class AlumChlorineReference(db.Model):
     #         # Get next available ID
     #         max_id = db.session.query(db.func.max(AlumChlorineReference.chemical_id)).scalar()
     #         self.chemical_id = (max_id or 0) + 1
+
+
+class AreaOfService(db.Model):
+    __tablename__ = 'area_of_service'
+
+    area_id = db.Column(Integer, primary_key=True)
+    area_name = db.Column(NVARCHAR(200), unique=True, nullable=False)
+
+    places = db.relationship('Place', back_populates='area')
+    stations = db.relationship('Station', back_populates='area')
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class PlaceType(db.Model):
+    __tablename__ = 'place_types'
+
+    place_type_id = db.Column(Integer, primary_key=True)
+    place_type_name = db.Column(NVARCHAR(100), unique=True, nullable=False)
+    person_portion_from = db.Column(Integer, nullable=False)
+    person_portion_to = db.Column(Integer, nullable=False)
+
+    places = db.relationship('Place', back_populates='place_type')
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class Place(db.Model):
+    __tablename__ = 'places'
+
+    place_id = db.Column(Integer, primary_key=True)
+    place_name = db.Column(NVARCHAR(200), unique=True, nullable=False)
+
+    place_type_id = db.Column(
+        Integer,
+        db.ForeignKey('place_types.place_type_id'),
+        nullable=False
+    )
+
+    branch_id = db.Column(
+        Integer,
+        db.ForeignKey('branches.branch_id'),
+        nullable=False
+    )
+
+    area_id = db.Column(
+        Integer,
+        db.ForeignKey('area_of_service.area_id'),
+        nullable=False
+    )
+
+    place_type = db.relationship('PlaceType', back_populates='places')
+    branch = db.relationship('Branch', back_populates='places')
+    area = db.relationship('AreaOfService', back_populates='places')
+
+    populations = db.relationship(
+        'PlacePopulation',
+        back_populates='place'
+    )
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class PlacePopulation(db.Model):
+    __tablename__ = 'place_population'
+
+    place_id = db.Column(
+        Integer,
+        db.ForeignKey('places.place_id'),
+        primary_key=True
+    )
+
+    population_year = db.Column(
+        Integer,
+        primary_key=True
+    )
+
+    population = db.Column(
+        Integer,
+        nullable=False
+    )
+
+    place = db.relationship('Place', back_populates='populations')
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
 
 
 class Group(db.Model):
