@@ -580,269 +580,6 @@ def home():
             } for bill in bills
         ]
 
-        def arabic_number(value):
-            if value >= 1_000_000_000:
-                return f"{value / 1_000_000_000:.1f} مليار"
-            elif value >= 1_000_000:
-                return f"{value / 1_000_000:.1f} مليون"
-            elif value >= 1_000:
-                return f"{value / 1000:.1f} ألف"
-            else:
-                return f"{value:,.0f}"
-
-        def sunburst_charts():
-            query = db.session.query(
-                Branch.branch_name,
-                Station.station_name,
-                Technology.technology_name,
-                TechnologyBill.technology_water_amount,
-                TechnologyBill.technology_power_consump,
-                TechnologyBill.technology_chlorine_consump,
-                TechnologyBill.technology_liquid_alum_consump,
-                TechnologyBill.technology_solid_alum_consump,
-            )
-            query = query.filter(
-                TechnologyBill.bill_year == 2025,
-                Station.station_type == "مياة"
-            )
-            query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
-            query = query.join(TechnologyBill.technology)
-            query = query.join(TechnologyBill.station)
-            query = query.join(Station.branch)
-
-            bills = query.all()
-            df = pd.DataFrame(bills)
-
-            # Convert chlorine from grams → tons
-            df['technology_chlorine_consump'] = df['technology_chlorine_consump'] / 1_000_000
-
-            # Convert liquid alum from grams → tons (if needed)
-            df['technology_liquid_alum_consump'] = df['technology_liquid_alum_consump'] / 1_000_000
-
-            # Convert solid alum from grams → tons (if needed)
-            df['technology_solid_alum_consump'] = df['technology_solid_alum_consump'] / 1_000_000
-
-            total_water = df['technology_water_amount'].sum()
-            total_power = df['technology_power_consump'].sum()
-            total_chlorine = df['technology_chlorine_consump'].sum()
-            total_liquid_alum = df['technology_liquid_alum_consump'].sum()
-            total_solid_alum = df['technology_solid_alum_consump'].sum()
-
-            # Chart 1: Water Production
-            fig_water = px.sunburst(
-                df,
-                path=['branch_name', 'station_name', 'technology_name'],
-                values='technology_water_amount',
-                color='technology_name',
-                title='نسبة إنتاج المياه حسب الفرع والمحطة والتقنية'
-            )
-            fig_water.update_traces(
-                hovertemplate="<b>%{label}</b><br><br>كمية المياه: %{value:,.0f} م³<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
-            )
-            fig_water.update_layout(
-                height=850,
-                font=dict(family="Arial", size=15),
-                coloraxis_showscale=False,
-                margin=dict(t=60, b=40, l=40, r=40)
-            )
-
-            # Chart 2: Power Consumption
-            fig_power = px.sunburst(
-                df,
-                path=['branch_name', 'station_name', 'technology_name'],
-                values='technology_power_consump',
-                color='technology_name',
-                title='نسبة استهلاك الكهرباء حسب الفرع والمحطة والتقنية'
-            )
-            fig_power.update_traces(
-                hovertemplate="<b>%{label}</b><br><br>استهلاك الكهرباء: %{value:,.0f} ك.و<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
-            )
-            fig_power.update_layout(
-                height=850,
-                font=dict(family="Arial", size=15),
-                coloraxis_showscale=False,
-                margin=dict(t=60, b=40, l=40, r=40)
-            )
-
-            # Chart 3: Chlorine Consumption
-            fig_chlorine = px.sunburst(
-                df,
-                path=['branch_name', 'station_name', 'technology_name'],
-                values='technology_chlorine_consump',
-                color='technology_name',
-                title='نسبة استهلاك الكلور حسب الفرع والمحطة والتقنية'
-            )
-            fig_chlorine.update_traces(
-                hovertemplate="<b>%{label}</b><br><br>كمية الكلور: %{value:,.3f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
-            )
-            fig_chlorine.update_layout(
-                height=850,
-                font=dict(family="Arial", size=15),
-                coloraxis_showscale=False,
-                margin=dict(t=60, b=40, l=40, r=40)
-            )
-
-            # Chart 4: Liquid Alum Consumption
-            fig_liquid = px.sunburst(
-                df,
-                path=['branch_name', 'station_name', 'technology_name'],
-                values='technology_liquid_alum_consump',
-                color='technology_name',
-                title='نسبة استهلاك الشبة السائلة حسب الفرع والمحطة والتقنية'
-            )
-            fig_liquid.update_traces(
-                hovertemplate="<b>%{label}</b><br><br>الشبة السائلة: %{value:,.3f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
-            )
-            fig_liquid.update_layout(
-                height=850,
-                font=dict(family="Arial", size=15),
-                coloraxis_showscale=False,
-                margin=dict(t=60, b=40, l=40, r=40)
-            )
-
-            # Chart 5: Solid Alum Consumption
-            fig_solid = px.sunburst(
-                df,
-                path=['branch_name', 'station_name', 'technology_name'],
-                values='technology_solid_alum_consump',
-                color='technology_name',
-                title='نسبة استهلاك الشبة الصلبة حسب الفرع والمحطة والتقنية'
-            )
-            fig_solid.update_traces(
-                hovertemplate="<b>%{label}</b><br><br>الشبة الصلبة: %{value:,.3f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
-            )
-            fig_solid.update_layout(
-                height=850,
-                font=dict(family="Arial", size=15),
-                coloraxis_showscale=False,
-                margin=dict(t=60, b=40, l=40, r=40)
-            )
-
-            # OR if you need HTML:
-            # return {
-            #     'sun_water': fig_water.to_html(full_html=False, include_plotlyjs=False),
-            #     'sun_power': fig_power.to_html(full_html=False, include_plotlyjs=False),
-            #     'sun_chlorine': fig_chlorine.to_html(full_html=False, include_plotlyjs=False),
-            #     'sun_liquid': fig_liquid.to_html(full_html=False, include_plotlyjs=False),
-            #     'sun_solid': fig_solid.to_html(full_html=False, include_plotlyjs=False)
-            # }
-            kpi_cards = f"""
-            <div class="row text-center" style="margin-top: 20px; margin-bottom: 20px;">
-    
-                <div class="col-md-2">
-                    <div class="card shadow-sm">
-                        <div class="card-body">
-                            <h6 class="text-secondary">إجمالي المياه</h6>
-                            <h4 class="text-primary">{arabic_number(total_water)} (م³)</h4>
-                        </div>
-                    </div>
-                </div>
-    
-                <div class="col-md-2">
-                    <div class="card shadow-sm">
-                        <div class="card-body">
-                            <h6 class="text-secondary">إجمالي الكهرباء</h6>
-                            <h4 class="text-primary">{arabic_number(total_power)} (KW)</h4>
-                        </div>
-                    </div>
-                </div>
-    
-                <div class="col-md-2">
-                    <div class="card shadow-sm">
-                        <div class="card-body">
-                            <h6 class="text-secondary">إجمالي الكلور</h6>
-                            <h4 class="text-primary">{arabic_number(total_chlorine)} طن</h4>
-                        </div>
-                    </div>
-                </div>
-    
-                <div class="col-md-3">
-                    <div class="card shadow-sm">
-                        <div class="card-body">
-                            <h6 class="text-secondary">إجمالي الشبة السائلة</h6>
-                            <h4 class="text-primary">{arabic_number(total_liquid_alum)} طن</h4>
-                        </div>
-                    </div>
-                </div>
-    
-                <div class="col-md-3">
-                    <div class="card shadow-sm">
-                        <div class="card-body">
-                            <h6 class="text-secondary">إجمالي الشبة الصلبة</h6>
-                            <h4 class="text-primary">{arabic_number(total_solid_alum)} طن</h4>
-                        </div>
-                    </div>
-                </div>
-    
-            </div>
-            """
-
-            tabs_html = f"""
-            <ul class="nav nav-tabs" id="dataTabs" role="tablist">
-              <li class="nav-item" role="presentation">
-                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#water" type="button">المياه</button>
-              </li>
-              <li class="nav-item" role="presentation">
-                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#power" type="button">الكهرباء</button>
-              </li>
-              <li class="nav-item" role="presentation">
-                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#chlorine" type="button">الكلور</button>
-              </li>
-              <li class="nav-item" role="presentation">
-                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#liquid" type="button">الشبة السائلة</button>
-              </li>
-              <li class="nav-item" role="presentation">
-                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#solid" type="button">الشبة الصلبة</button>
-              </li>
-            </ul>
-
-            <div class="tab-content" style="margin-top: 20px;">
-              <div class="tab-pane fade show active" id="water">{fig_water.to_html(full_html=False, include_plotlyjs='cdn')}</div>
-              <div class="tab-pane fade" id="power">{fig_power.to_html(full_html=False, include_plotlyjs=False)}</div>
-              <div class="tab-pane fade" id="chlorine">{fig_chlorine.to_html(full_html=False, include_plotlyjs=False)}</div>
-              <div class="tab-pane fade" id="liquid">{fig_liquid.to_html(full_html=False, include_plotlyjs=False)}</div>
-              <div class="tab-pane fade" id="solid">{fig_solid.to_html(full_html=False, include_plotlyjs=False)}</div>
-            </div>
-            """
-
-            full_dashboard_html = f"""
-            <html lang="ar" dir="rtl">
-            <head>
-                <meta charset="UTF-8">
-                <title>Dashboard</title>
-
-                <!-- Bootstrap -->
-                <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-
-                <style>
-                    body {{
-                        background-color: #f8f9fa;
-                        font-family: 'Arial';
-                    }}
-                </style>
-            </head>
-
-            <body>
-
-            <div class="container">
-
-                <h2 class="text-center mt-4 mb-4 text-primary">
-                    لوحة تحليل استهلاك وإنتاج المحطات
-                </h2>
-
-                {kpi_cards}
-
-                {tabs_html}
-
-            </div>
-
-            <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
-            </body>
-            </html>
-            """
-            return full_dashboard_html
-
         return jsonify(
             power=totals['power'],
             water=totals['water'],
@@ -851,7 +588,6 @@ def home():
             chlorine=totals['chlorine'],
             solid_alum=totals['solid_alum'],
             liquid_alum=totals['liquid_alum'],
-            water_chart=sunburst_charts(),
             over_power_consump=over_power_consump,
             over_chlorine_consump=over_chlorine_consump,
             over_solid_alum_consump=over_solid_alum_consump,
@@ -2262,9 +1998,271 @@ def show_charts(station_id, tech_id):
     )
 
 
-@app.route("/finantial-analysis", methods=['GET', 'POST'])
-def finantial_analysis():
-    pass
+@app.route("/financial-analysis", methods=['GET', 'POST'])
+def financial_analysis():
+    def arabic_number(value):
+        if value >= 1_000_000_000:
+            return f"{value / 1_000_000_000:.1f} مليار"
+        elif value >= 1_000_000:
+            return f"{value / 1_000_000:.1f} مليون"
+        elif value >= 1_000:
+            return f"{value / 1000:.1f} ألف"
+        else:
+            return f"{value:,.0f}"
+
+    def sunburst_charts():
+        query = db.session.query(
+            Branch.branch_name,
+            Station.station_name,
+            Technology.technology_name,
+            TechnologyBill.technology_water_amount,
+            TechnologyBill.technology_power_consump,
+            TechnologyBill.technology_chlorine_consump,
+            TechnologyBill.technology_liquid_alum_consump,
+            TechnologyBill.technology_solid_alum_consump,
+        )
+        query = query.filter(
+            TechnologyBill.bill_year == 2025,
+            Station.station_type == "مياة"
+        )
+        query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
+        query = query.join(TechnologyBill.technology)
+        query = query.join(TechnologyBill.station)
+        query = query.join(Station.branch)
+
+        bills = query.all()
+        df = pd.DataFrame(bills)
+
+        # Convert chlorine from grams → tons
+        df['technology_chlorine_consump'] = df['technology_chlorine_consump'] / 1_000_000
+
+        # Convert liquid alum from grams → tons (if needed)
+        df['technology_liquid_alum_consump'] = df['technology_liquid_alum_consump'] / 1_000_000
+
+        # Convert solid alum from grams → tons (if needed)
+        df['technology_solid_alum_consump'] = df['technology_solid_alum_consump'] / 1_000_000
+
+        total_water = df['technology_water_amount'].sum()
+        total_power = df['technology_power_consump'].sum()
+        total_chlorine = df['technology_chlorine_consump'].sum()
+        total_liquid_alum = df['technology_liquid_alum_consump'].sum()
+        total_solid_alum = df['technology_solid_alum_consump'].sum()
+
+        # Chart 1: Water Production
+        fig_water = px.sunburst(
+            df,
+            path=['branch_name', 'station_name', 'technology_name'],
+            values='technology_water_amount',
+            color='technology_name',
+            title='نسبة إنتاج المياه حسب الفرع والمحطة والتقنية'
+        )
+        fig_water.update_traces(
+            hovertemplate="<b>%{label}</b><br><br>كمية المياه: %{value:,.0f} م³<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+        )
+        fig_water.update_layout(
+            height=850,
+            font=dict(family="Arial", size=15),
+            coloraxis_showscale=False,
+            margin=dict(t=60, b=40, l=40, r=40)
+        )
+
+        # Chart 2: Power Consumption
+        fig_power = px.sunburst(
+            df,
+            path=['branch_name', 'station_name', 'technology_name'],
+            values='technology_power_consump',
+            color='technology_name',
+            title='نسبة استهلاك الكهرباء حسب الفرع والمحطة والتقنية'
+        )
+        fig_power.update_traces(
+            hovertemplate="<b>%{label}</b><br><br>استهلاك الكهرباء: %{value:,.0f} ك.و<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+        )
+        fig_power.update_layout(
+            height=850,
+            font=dict(family="Arial", size=15),
+            coloraxis_showscale=False,
+            margin=dict(t=60, b=40, l=40, r=40)
+        )
+
+        # Chart 3: Chlorine Consumption
+        fig_chlorine = px.sunburst(
+            df,
+            path=['branch_name', 'station_name', 'technology_name'],
+            values='technology_chlorine_consump',
+            color='technology_name',
+            title='نسبة استهلاك الكلور حسب الفرع والمحطة والتقنية'
+        )
+        fig_chlorine.update_traces(
+            hovertemplate="<b>%{label}</b><br><br>كمية الكلور: %{value:,.3f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+        )
+        fig_chlorine.update_layout(
+            height=850,
+            font=dict(family="Arial", size=15),
+            coloraxis_showscale=False,
+            margin=dict(t=60, b=40, l=40, r=40)
+        )
+
+        # Chart 4: Liquid Alum Consumption
+        fig_liquid = px.sunburst(
+            df,
+            path=['branch_name', 'station_name', 'technology_name'],
+            values='technology_liquid_alum_consump',
+            color='technology_name',
+            title='نسبة استهلاك الشبة السائلة حسب الفرع والمحطة والتقنية'
+        )
+        fig_liquid.update_traces(
+            hovertemplate="<b>%{label}</b><br><br>الشبة السائلة: %{value:,.3f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+        )
+        fig_liquid.update_layout(
+            height=850,
+            font=dict(family="Arial", size=15),
+            coloraxis_showscale=False,
+            margin=dict(t=60, b=40, l=40, r=40)
+        )
+
+        # Chart 5: Solid Alum Consumption
+        fig_solid = px.sunburst(
+            df,
+            path=['branch_name', 'station_name', 'technology_name'],
+            values='technology_solid_alum_consump',
+            color='technology_name',
+            title='نسبة استهلاك الشبة الصلبة حسب الفرع والمحطة والتقنية'
+        )
+        fig_solid.update_traces(
+            hovertemplate="<b>%{label}</b><br><br>الشبة الصلبة: %{value:,.3f} طن<br>نسبة من الإجمالي: %{percentRoot:.2%}<br><extra></extra>"
+        )
+        fig_solid.update_layout(
+            height=850,
+            font=dict(family="Arial", size=15),
+            coloraxis_showscale=False,
+            margin=dict(t=60, b=40, l=40, r=40)
+        )
+
+        # OR if you need HTML:
+        # return {
+        #     'sun_water': fig_water.to_html(full_html=False, include_plotlyjs=False),
+        #     'sun_power': fig_power.to_html(full_html=False, include_plotlyjs=False),
+        #     'sun_chlorine': fig_chlorine.to_html(full_html=False, include_plotlyjs=False),
+        #     'sun_liquid': fig_liquid.to_html(full_html=False, include_plotlyjs=False),
+        #     'sun_solid': fig_solid.to_html(full_html=False, include_plotlyjs=False)
+        # }
+        kpi_cards = f"""
+        <div class="row text-center" style="margin-top: 20px; margin-bottom: 20px;">
+
+            <div class="col-md-2">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h6 class="text-secondary">إجمالي المياه</h6>
+                        <h4 class="text-primary">{arabic_number(total_water)} (م³)</h4>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-2">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h6 class="text-secondary">إجمالي الكهرباء</h6>
+                        <h4 class="text-primary">{arabic_number(total_power)} (KW)</h4>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-2">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h6 class="text-secondary">إجمالي الكلور</h6>
+                        <h4 class="text-primary">{arabic_number(total_chlorine)} طن</h4>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h6 class="text-secondary">إجمالي الشبة السائلة</h6>
+                        <h4 class="text-primary">{arabic_number(total_liquid_alum)} طن</h4>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h6 class="text-secondary">إجمالي الشبة الصلبة</h6>
+                        <h4 class="text-primary">{arabic_number(total_solid_alum)} طن</h4>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+        """
+
+        tabs_html = f"""
+        <ul class="nav nav-tabs" id="dataTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#water" type="button">المياه</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#power" type="button">الكهرباء</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#chlorine" type="button">الكلور</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#liquid" type="button">الشبة السائلة</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#solid" type="button">الشبة الصلبة</button>
+          </li>
+        </ul>
+
+        <div class="tab-content" style="margin-top: 20px;">
+          <div class="tab-pane fade show active" id="water">{fig_water.to_html(full_html=False, include_plotlyjs='cdn')}</div>
+          <div class="tab-pane fade" id="power">{fig_power.to_html(full_html=False, include_plotlyjs=False)}</div>
+          <div class="tab-pane fade" id="chlorine">{fig_chlorine.to_html(full_html=False, include_plotlyjs=False)}</div>
+          <div class="tab-pane fade" id="liquid">{fig_liquid.to_html(full_html=False, include_plotlyjs=False)}</div>
+          <div class="tab-pane fade" id="solid">{fig_solid.to_html(full_html=False, include_plotlyjs=False)}</div>
+        </div>
+        """
+
+        full_dashboard_html = f"""
+        <html lang="ar" dir="rtl">
+        <head>
+            <meta charset="UTF-8">
+            <title>Dashboard</title>
+
+            <!-- Bootstrap -->
+            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+            <style>
+                body {{
+                    background-color: #f8f9fa;
+                    font-family: 'Arial';
+                }}
+            </style>
+        </head>
+
+        <body>
+
+        <div class="container">
+
+            <h2 class="text-center mt-4 mb-4 text-primary">
+                لوحة تحليل استهلاك وإنتاج المحطات
+            </h2>
+
+            {kpi_cards}
+
+            {tabs_html}
+
+        </div>
+
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+        </body>
+        </html>
+        """
+        return full_dashboard_html
+    return jsonify({"water_chart": sunburst_charts()})
 
 
 @app.route("/annual-bills")
@@ -2718,6 +2716,240 @@ def show_reports(current_user):
             # print(bills_list)
             return jsonify(bills_list)
     return jsonify({"response": "سبحان الله وبحمده"})   # current_user.group.to_dict()
+
+
+# Planning sector routes
+@app.route("/place-types")
+@private_route([1, 5])
+def place_types(current_user):
+    all_types = db.session.query(PlaceType).all()
+    all_types_list = [p_type.to_dict() for p_type in all_types]
+    print(all_types_list)
+    return jsonify(all_types_list)
+
+
+@app.route("/edit-place-type/<place_type_id>", methods=["GET", "POST"])
+@private_route([1, 5])
+def edit_place_type(place_type_id, current_user):
+
+    if request.method == "POST":
+        data = request.get_json()
+        current_type = db.session.get(PlaceType, place_type_id)
+        current_type.place_type_name = data["place_type_name"]
+        current_type.person_portion_from = data["person_portion_from"]
+        current_type.person_portion_to = data["person_portion_to"]
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم تعديل البيانات بنجاح"
+                }
+            }
+            return jsonify(response), 200
+
+    return jsonify({"response": "بسم الله"})
+
+
+@app.route("/places")
+@private_route([1, 5])
+def get_places(current_user):
+    all_places = db.session.query(Place).all()
+    all_places_list = [place.to_dict() for place in all_places]
+    return jsonify(all_places_list)
+
+
+@app.route("/edit-place/<place_id>", methods=["GET", "POST"])
+@private_route([1, 5])
+def edit_place(place_id, current_user):
+    all_place_types = db.session.query(PlaceType).all()
+    all_place_types_list = [p_type.to_dict() for p_type in all_place_types]
+
+    all_branches = db.session.query(Branch).all()
+    all_branches_list = [branch.to_dict() for branch in all_branches]
+
+    all_areas = db.session.query(AreaOfService).all()
+    all_areas_list = [area.to_dict() for area in all_areas]
+
+    if request.method == "POST":
+        data = request.get_json()
+        current_place = db.session.get(Place, place_id)
+        current_place.place_name = data["place_name"]
+        current_place.place_type_id = data["place_type_id"]
+        current_place.branch_id = data["branch_id"]
+        current_place.area_id = data["area_id"]
+
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم تعديل البيانات المكان بنجاح"
+                }
+            }
+            return jsonify(response), 200
+
+    return jsonify(place_types=all_place_types_list, branches=all_branches_list, areas=all_areas_list)
+
+
+@app.route("/new-place", methods=["GET", "POST"])
+@private_route([1, 5])
+def add_new_place(current_user):
+    all_place_types = db.session.query(PlaceType).all()
+    all_place_types_list = [p_type.to_dict() for p_type in all_place_types]
+
+    all_branches = db.session.query(Branch).all()
+    all_branches_list = [branch.to_dict() for branch in all_branches]
+
+    all_areas = db.session.query(AreaOfService).all()
+    all_areas_list = [area.to_dict() for area in all_areas]
+
+    if request.method == "POST":
+        data = request.get_json()
+        new_place = Place(
+            place_name=data["place_name"],
+            place_type_id=data["place_type_id"],
+            branch_id=data["branch_id"],
+            area_id=data["area_id"],
+        )
+        db.session.add(new_place)
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم إضافة المكان بنجاح"
+                }
+            }
+            return jsonify(response), 200
+    return jsonify(place_types=all_place_types_list, branches=all_branches_list, areas=all_areas_list)
+
+
+@app.route("/places-population")
+@private_route([1, 5])
+def places_population(current_user):
+    p_pops = db.session.query(PlacePopulation).all()
+    p_pop_list = [p_pop.to_dict() for p_pop in p_pops]
+    return jsonify(p_pop_list)
+
+
+@app.route("/edit-place-pop/<place_id>/<year>", methods=["GET", "POST"])
+@private_route([1, 5])
+def edit_place_pop(place_id, year, current_user):
+    current_place = db.query.get(Place, place_id)
+
+    if request.method == "POST":
+        data = request.get_json()
+        current_place_pop = db.session.query(PlacePopulation).filter(
+            PlacePopulation.place_id == place_id,
+            PlacePopulation.year == year,
+        ).first()
+        current_place_pop.population_year = data["population_year"]
+        current_place_pop.population = data["population"]
+
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم تعديل البيانات بنجاح"
+                }
+            }
+            return jsonify(response), 200
+
+    return jsonify(current_place)
+
+
+@app.route("/new-population/<place_id>", methods=["GET", "POST"])
+@private_route([1, 5])
+def add_new_population(place_id, current_user):
+    current_place = db.query.get(Place, place_id)
+    if request.method == "POST":
+        data = request.get_json()
+        new_pop = PlacePopulation(
+            place_id=place_id,
+            population=data["population"],
+            population_year=data["population_year"],
+        )
+
+        db.session.add(new_pop)
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم إضافة التعداد بنجاح"
+                }
+            }
+            return jsonify(response), 200
+
+    return jsonify(current_place)
+# End of planning sector routes
 
 
 
