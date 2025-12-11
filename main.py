@@ -3,7 +3,8 @@ from decimal import Decimal
 
 import numpy as np
 from flask import Flask, abort, jsonify, render_template, request, make_response, current_app, g, has_request_context, session as flask_session
-from sqlalchemy import and_, or_, not_, func, case, event, inspect
+from seaborn._marks.area import Area
+from sqlalchemy import and_, or_, not_, func, case, event, inspect, desc
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, DataError
 from flask_cors import CORS
 from models import *
@@ -2921,7 +2922,7 @@ def add_new_population(place_id, current_user):
         new_pop = PlacePopulation(
             place_id=place_id,
             population=data["population"],
-            population_year=data["population_year"],
+            population_year=data["population_year"]
         )
 
         db.session.add(new_pop)
@@ -2949,6 +2950,85 @@ def add_new_population(place_id, current_user):
             return jsonify(response), 200
 
     return jsonify(current_place)
+
+
+@app.route("/balance-plot-calc/<area_id>")
+@private_route([1, 5])
+def balance_plot_calc(area_id, current_user):
+    current_area = db.query.get(Area, area_id)
+    all_place_types = db.session.query(PlaceType).all()
+    all_place_types_list = [p_type.to_dict() for p_type in all_place_types]
+    if request.method == "POST":
+        data = request.get_json()
+        if data["calc_type"] == "equation":
+
+            total_stations_capacity = 0
+            for station in current_area.stations:
+                total_stations_capacity += station.station_capacity
+
+            # Financial year calculating expression
+            financial_year = case(
+                (TechnologyBill.bill_month >= 7, TechnologyBill.bill_year),
+                else_=TechnologyBill.bill_year - 1
+            ).label("financial_year")
+
+            results = (
+                db.session.query(
+                    financial_year,
+                    func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                )
+                .join(TechnologyBill.station)
+                .filter(
+                    Station.station_type == "مياة",
+                    TechnologyBill.technology_water_amount.isnot(None),
+                    Station.area_id == area_id
+                )
+                .group_by(financial_year)
+                .order_by(financial_year)
+                .all()
+            )
+            year_water_list = [
+                {
+                    "financial_year": int(year),
+                    "total_water": float(total_water) / 366
+                }
+                for year, total_water in results
+            ]
+            rows = []
+            for i in range(datetime.now().year, data["goal_year"]):
+                water_need = 0
+                for p in current_area.places:
+                    p_pops = db.session.query(PlacePopulation).filter(
+                        PlacePopulation.place_id == p.place_id,
+                    ).order_by(desc(PlacePopulation.population_year)).all()
+                    g_rate = (((p_pops[0].population / p_pops[1].population) ** (1 / (p_pops[0].population_year - p_pops[1].population_year))) - 1) * 100
+                    if g_rate > 2.5:
+                        g_rate = 2.5
+                    elif g_rate < 1.0:
+                        g_rate = 1.0
+                    i_pop = p_pops[0].population * ((1 + g_rate / 100) ** (i - p_pops[0].population_year))
+                    if i_pop > 40000:
+                        water_need += i_pop * 150 / 1000
+                    elif i_pop > 30000:
+                        water_need += i_pop * 130 / 1000
+                    elif i_pop > 20000:
+                        water_need += i_pop * 120 / 1000
+                    elif i_pop > 10000:
+                        water_need += i_pop * 110 / 1000
+                    else:
+                        water_need += i_pop * 100 / 1000
+
+                rows.append({'year': i, 'water_need': water_need})
+            df = pd.DataFrame(rows)
+
+
+        elif data["calc_type"] == "machine_learning":
+            pass
+        else:
+            pass
+
+    return jsonify(all_place_types_list)
+
 # End of planning sector routes
 
 
