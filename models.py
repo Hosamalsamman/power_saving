@@ -367,7 +367,11 @@ class Place(db.Model):
     populations = db.relationship('PlacePopulation', back_populates='place')
 
     def to_dict(self):
-        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        data['area_name'] = self.area.area_name if self.area else None
+        data['branch_name'] = self.branch.branch_name if self.branch else None
+        data['place_type_name'] = self.place_type.place_type_name if self.place_type else None
+        return data
 
 
 class PlacePopulation(db.Model):

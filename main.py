@@ -1,9 +1,11 @@
 import os
+from collections import defaultdict
 from decimal import Decimal
 
 import numpy as np
 from flask import Flask, abort, jsonify, render_template, request, make_response, current_app, g, has_request_context, session as flask_session
 from seaborn._marks.area import Area
+from sklearn.metrics import r2_score, mean_absolute_error
 from sqlalchemy import and_, or_, not_, func, case, event, inspect, desc
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, DataError
 from flask_cors import CORS
@@ -1022,7 +1024,7 @@ def add_new_bill(account_number, current_user):
         )
         # check prev-reading
         if new_bill.prev_reading != gauge.final_reading:
-            print(new_bill.to_dict())
+            # print(new_bill.to_dict())
             return jsonify({"error": "القراءة السابقة غير مطابقة لآخر قراءة مسجلة لدينا"}), 410
         # check reading factor
         if new_bill.reading_factor != gauge.meter_factor:
@@ -2953,18 +2955,17 @@ def add_new_population(place_id, current_user):
 
 
 @app.route("/balance-plot-calc/<area_id>")
-@private_route([1, 5])
-def balance_plot_calc(area_id, current_user):
+# @private_route([1, 5])
+def balance_plot_calc(area_id):
     current_area = db.query.get(Area, area_id)
     all_place_types = db.session.query(PlaceType).all()
     all_place_types_list = [p_type.to_dict() for p_type in all_place_types]
     if request.method == "POST":
         data = request.get_json()
+        total_stations_capacity = 0
+        for station in current_area.stations:
+            total_stations_capacity += station.station_capacity
         if data["calc_type"] == "equation":
-
-            total_stations_capacity = 0
-            for station in current_area.stations:
-                total_stations_capacity += station.station_capacity
 
             # Financial year calculating expression
             financial_year = case(
@@ -2994,8 +2995,12 @@ def balance_plot_calc(area_id, current_user):
                 }
                 for year, total_water in results
             ]
+            year_water_dict = {
+                item["financial_year"]: item["total_water"]
+                for item in year_water_list
+            }
             rows = []
-            for i in range(datetime.now().year, data["goal_year"]):
+            for i in range(year_water_list[0]["financial_year"], data["goal_year"]):
                 water_need = 0
                 for p in current_area.places:
                     p_pops = db.session.query(PlacePopulation).filter(
@@ -3018,14 +3023,422 @@ def balance_plot_calc(area_id, current_user):
                     else:
                         water_need += i_pop * 100 / 1000
 
-                rows.append({'year': i, 'water_need': water_need})
+                production = (
+                    year_water_dict.get(i, year_water_dict[max(year_water_dict)])
+                    if year_water_dict else None
+                )
+                rows.append(
+                    {
+                        'year': i,
+                        'water_need': water_need,
+                        'current_production': production,
+                        'max_production': total_stations_capacity
+                    }
+                )
             df = pd.DataFrame(rows)
+            fig, ax = plt.subplots(figsize=(12, 7))
+
+            # --------------------
+            # Plot lines
+            # --------------------
+
+            # Water need (demand)
+            ax.plot(
+                df['year'],
+                df['water_need'],
+                linestyle='--',
+                color='green',
+                linewidth=2.5,
+                marker='o',
+                label=get_display(arabic_reshaper.reshape('الاحتياج المائي'))
+            )
+
+            # Current production
+            ax.plot(
+                df['year'],
+                df['current_production'],
+                color='lightblue',
+                linewidth=3,
+                marker='s',
+                label=get_display(arabic_reshaper.reshape('القدرة الفعلية'))
+            )
+
+            # Max production (capacity)
+            ax.plot(
+                df['year'],
+                df['max_production'],
+                color='black',
+                linewidth=3,
+                label=get_display(arabic_reshaper.reshape('القدرة التصميمية'))
+            )
+
+            # --------------------
+            # X-axis formatting
+            # --------------------
+            ax.set_xticks(df['year'])
+            ax.set_xticklabels(df['year'], rotation=45)
+
+            # --------------------
+            # Labels & title
+            # --------------------
+            ax.set_xlabel(get_display(arabic_reshaper.reshape('السنة')), fontsize=12)
+            ax.set_ylabel(get_display(arabic_reshaper.reshape('كمية المياه (م³ / يوم)')), fontsize=12)
+
+            ax.set_title(
+                get_display(arabic_reshaper.reshape(f" منحنى الاتزان ل{current_area.area_name} حسب معادلة نصيب الفرد ")),
+                fontsize=16,
+                fontweight='bold',
+                pad=15
+            )
+
+            # --------------------
+            # Grid (soft & readable)
+            # --------------------
+            ax.grid(
+                True,
+                which='major',
+                linestyle='--',
+                linewidth=0.6,
+                alpha=0.6
+            )
+
+            # --------------------
+            # Legend (clean & clear)
+            # --------------------
+            ax.legend(
+                loc='upper left',
+                fontsize=11,
+                frameon=True,
+                shadow=True
+            )
+
+            # --------------------
+            # Visual limits (padding)
+            # --------------------
+            y_max = max(
+                df['water_need'].max(),
+                df['current_production'].max(),
+                df['max_production'].max()
+            )
+            ax.set_ylim(0, y_max * 1.15)
+
+            # --------------------
+            # Layout
+            # --------------------
+            plt.tight_layout()
+            plt.show()
+            return None
 
 
         elif data["calc_type"] == "machine_learning":
-            pass
+            results = (
+                db.session.query(
+                TechnologyBill.bill_month,
+                TechnologyBill.bill_year,
+                func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                )
+                .join(
+                    TechnologyBill.station
+                )
+                .filter(
+                    Station.station_type == "مياة",
+                    TechnologyBill.technology_water_amount.isnot(None),
+                    Station.area_id == area_id
+                )
+                .group_by(
+                    TechnologyBill.bill_month,
+                    TechnologyBill.bill_year
+                )
+                .order_by(
+                    TechnologyBill.bill_month,
+                    TechnologyBill.bill_year
+                )
+                .all()
+            )
+            df = pd.DataFrame(results, columns=["month", "year", "total_water"])
+            pop_data = defaultdict(list)
+
+            for p in current_area.places:
+                pops = (
+                    db.session.query(PlacePopulation)
+                    .filter(PlacePopulation.place_id == p.place_id)
+                    .order_by(desc(PlacePopulation.population_year))
+                    .all()
+                )
+                if len(pops) >= 2:
+                    pop_data[p.place_id] = pops
+
+            def estimate_monthly_population(pops, target_year, target_month):
+                """
+                pops: ordered desc by population_year
+                """
+                latest, previous = pops[0], pops[1]
+
+                # Annual growth rate
+                r = ((latest.population / previous.population) ** (
+                        1 / (latest.population_year - previous.population_year)
+                )) - 1
+
+                # Monthly growth rate
+                monthly_r = (1 + r) ** (1 / 12) - 1
+
+                # Month difference
+                months_diff = (
+                        (target_year - latest.population_year) * 12
+                        + (target_month - 1)
+                )
+
+                return latest.population * ((1 + monthly_r) ** months_diff)
+
+            area_population = []
+
+            for _, row in df.iterrows():
+                total_pop = 0
+
+                for place_id, pops in pop_data.items():
+                    total_pop += estimate_monthly_population(
+                        pops,
+                        row["year"],
+                        row["month"]
+                    )
+
+                area_population.append(total_pop)
+
+            df["population"] = area_population
+            df["month_sin"] = np.sin(2 * np.pi * df["month"] / 12)
+            df["month_cos"] = np.cos(2 * np.pi * df["month"] / 12)
+            df.info()
+            df.head()
+
+            df = df.sort_values(["year", "month"]).reset_index(drop=True)
+
+            split_idx = int(len(df) * 0.8)
+
+            train_df = df.iloc[:split_idx]
+            test_df = df.iloc[split_idx:]
+
+            # df["year_index"] = df["year"] - df["year"].min()
+
+            features = ["population", "month_sin", "month_cos"]
+            # Optional trend
+            if "year_index" in df.columns:
+                features.append("year_index")
+
+            X_train = train_df[features]
+            y_train = train_df["total_water"]
+
+            X_test = test_df[features]
+            y_test = test_df["total_water"]
+
+            model = LinearRegression()
+            model.fit(X_train, y_train)
+
+            y_pred = model.predict(X_test)
+
+            print("R²:", r2_score(y_test, y_pred))
+            print("MAE:", mean_absolute_error(y_test, y_pred))
+
+            plt.figure()
+            plt.plot(y_test.values, label="Actual")
+            plt.plot(y_pred, label="Predicted")
+            plt.legend()
+            plt.title("Actual vs Predicted Water Production")
+            plt.show()
+            # This is GOLD
+            coef_df = pd.DataFrame({
+                "feature": features,
+                "coefficient": model.coef_
+            })
+
+            print(coef_df)
+
+            # 1️⃣ Seasonal peak month
+            beta_2, beta_3 = model.coef_[features.index("month_sin")], model.coef_[features.index("month_cos")]
+            month_angle = np.arctan2(beta_2, beta_3)
+            peak_month = ((month_angle / (2 * np.pi)) * 12) % 12
+            peak_month = int(np.round(peak_month)) + 1
+
+            # 2️⃣ Solve for population at max water
+            target_water = total_stations_capacity  # or observed max
+            beta_0 = model.intercept_
+            beta_1 = model.coef_[features.index("population")]
+            beta_4 = model.coef_[features.index("year_index")]
+
+            # Assume seasonal_peak = beta_2*sin + beta_3*cos
+            seasonal_peak = beta_2 * np.sin(2 * np.pi * peak_month / 12) + beta_3 * np.cos(2 * np.pi * peak_month / 12)
+
+            # Need year_index guess (start with 0)
+            year_index_guess = 0  # will refine iteratively if needed
+            pop_max = (target_water - (beta_0 + seasonal_peak + beta_4 * year_index_guess)) / beta_1
+
+            # 3️⃣ Convert population to year/month
+            P0 = df["population"].iloc[-1]  # last known population
+            monthly_rate = ((P0 / df["population"].iloc[-2]) ** (1 / 12)) - 1
+            months_diff = np.log(pop_max / P0) / np.log(1 + monthly_rate)
+
+            year = int(df["year"].iloc[-1] + months_diff // 12)
+            month = int((months_diff % 12) + 1)
+
+            print("Max production occurs at population:", int(pop_max))
+            print("Predicted year/month:", year, month)
+
+            return None
         else:
-            pass
+            # Financial year calculating expression
+            financial_year = case(
+                (TechnologyBill.bill_month >= 7, TechnologyBill.bill_year),
+                else_=TechnologyBill.bill_year - 1
+            ).label("financial_year")
+
+            results = (
+                db.session.query(
+                    financial_year,
+                    func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                )
+                .join(TechnologyBill.station)
+                .filter(
+                    Station.station_type == "مياة",
+                    TechnologyBill.technology_water_amount.isnot(None),
+                    Station.area_id == area_id
+                )
+                .group_by(financial_year)
+                .order_by(financial_year)
+                .all()
+            )
+            year_water_list = [
+                {
+                    "financial_year": int(year),
+                    "total_water": float(total_water) / 366
+                }
+                for year, total_water in results
+            ]
+            year_water_dict = {
+                item["financial_year"]: item["total_water"]
+                for item in year_water_list
+            }
+            rows = []
+            for i in range(year_water_list[0]["financial_year"], data["goal_year"]):
+                water_need = 0
+                for p in current_area.places:
+                    p_pops = db.session.query(PlacePopulation).filter(
+                        PlacePopulation.place_id == p.place_id,
+                    ).order_by(desc(PlacePopulation.population_year)).all()
+                    g_rate = (((p_pops[0].population / p_pops[1].population) ** (
+                                1 / (p_pops[0].population_year - p_pops[1].population_year))) - 1) * 100
+                    if g_rate > 2.5:
+                        g_rate = 2.5
+                    elif g_rate < 1.0:
+                        g_rate = 1.0
+                    i_pop = p_pops[0].population * ((1 + g_rate / 100) ** (i - p_pops[0].population_year))
+
+                    water_need += i_pop * data[p.place_id] / 1000
+
+                production = (
+                    year_water_dict.get(i, year_water_dict[max(year_water_dict)])
+                    if year_water_dict else None
+                )
+                rows.append(
+                    {
+                        'year': i,
+                        'water_need': water_need,
+                        'current_production': production,
+                        'max_production': total_stations_capacity
+                    }
+                )
+            df = pd.DataFrame(rows)
+            fig, ax = plt.subplots(figsize=(12, 7))
+
+            # --------------------
+            # Plot lines
+            # --------------------
+
+            # Water need (demand)
+            ax.plot(
+                df['year'],
+                df['water_need'],
+                linestyle='--',
+                color='green',
+                linewidth=2.5,
+                marker='o',
+                label=get_display(arabic_reshaper.reshape('الاحتياج المائي'))
+            )
+
+            # Current production
+            ax.plot(
+                df['year'],
+                df['current_production'],
+                color='lightblue',
+                linewidth=3,
+                marker='s',
+                label=get_display(arabic_reshaper.reshape('القدرة الفعلية'))
+            )
+
+            # Max production (capacity)
+            ax.plot(
+                df['year'],
+                df['max_production'],
+                color='black',
+                linewidth=3,
+                label=get_display(arabic_reshaper.reshape('القدرة التصميمية'))
+            )
+
+            # --------------------
+            # X-axis formatting
+            # --------------------
+            ax.set_xticks(df['year'])
+            ax.set_xticklabels(df['year'], rotation=45)
+
+            # --------------------
+            # Labels & title
+            # --------------------
+            ax.set_xlabel(get_display(arabic_reshaper.reshape('السنة')), fontsize=12)
+            ax.set_ylabel(get_display(arabic_reshaper.reshape('كمية المياه (م³ / يوم)')), fontsize=12)
+
+            ax.set_title(
+                get_display(
+                    arabic_reshaper.reshape(f" منحنى الاتزان ل{current_area.area_name} حسب معادلة نصيب الفرد ")),
+                fontsize=16,
+                fontweight='bold',
+                pad=15
+            )
+
+            # --------------------
+            # Grid (soft & readable)
+            # --------------------
+            ax.grid(
+                True,
+                which='major',
+                linestyle='--',
+                linewidth=0.6,
+                alpha=0.6
+            )
+
+            # --------------------
+            # Legend (clean & clear)
+            # --------------------
+            ax.legend(
+                loc='upper left',
+                fontsize=11,
+                frameon=True,
+                shadow=True
+            )
+
+            # --------------------
+            # Visual limits (padding)
+            # --------------------
+            y_max = max(
+                df['water_need'].max(),
+                df['current_production'].max(),
+                df['max_production'].max()
+            )
+            ax.set_ylim(0, y_max * 1.15)
+
+            # --------------------
+            # Layout
+            # --------------------
+            plt.tight_layout()
+            plt.show()
+            return None
 
     return jsonify(all_place_types_list)
 
