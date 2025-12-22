@@ -371,6 +371,7 @@ class Place(db.Model):
         data['area_name'] = self.area.area_name if self.area else None
         data['branch_name'] = self.branch.branch_name if self.branch else None
         data['place_type_name'] = self.place_type.place_type_name if self.place_type else None
+        data['populations'] = [p.to_dict() for p in sorted(self.populations, key=lambda x: x.population_year)]
         return data
 
 
