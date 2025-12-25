@@ -21,7 +21,7 @@ import matplotlib
 import json
 import plotly.express as px
 
-matplotlib.use("Agg")  # ← force headless, non‑GUI backend
+# matplotlib.use("Agg")  # ← force headless, non‑GUI backend
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import io
@@ -2954,17 +2954,17 @@ def add_new_population(place_id, current_user):
     return jsonify(current_place)
 
 
-@app.route("/balance-plot-calc/<area_id>")
+@app.route("/balance-plot-calc/<area_id>", methods=["GET", "POST"])
 # @private_route([1, 5])
 def balance_plot_calc(area_id):
-    current_area = db.query.get(Area, area_id)
+    current_area = db.session.get(AreaOfService, area_id)
     all_place_types = db.session.query(PlaceType).all()
     all_place_types_list = [p_type.to_dict() for p_type in all_place_types]
     if request.method == "POST":
         data = request.get_json()
         total_stations_capacity = 0
         for station in current_area.stations:
-            total_stations_capacity += station.station_capacity
+            total_stations_capacity += station.station_water_capacity
         if data["calc_type"] == "machine_learning":
             results = (
                 db.session.query(
@@ -3098,14 +3098,14 @@ def balance_plot_calc(area_id):
             target_water = total_stations_capacity  # or observed max
             beta_0 = model.intercept_
             beta_1 = model.coef_[features.index("population")]
-            beta_4 = model.coef_[features.index("year_index")]
+            # beta_4 = model.coef_[features.index("year_index")]
 
             # Assume seasonal_peak = beta_2*sin + beta_3*cos
             seasonal_peak = beta_2 * np.sin(2 * np.pi * peak_month / 12) + beta_3 * np.cos(2 * np.pi * peak_month / 12)
 
             # Need year_index guess (start with 0)
             year_index_guess = 0  # will refine iteratively if needed
-            pop_max = (target_water - (beta_0 + seasonal_peak + beta_4 * year_index_guess)) / beta_1
+            pop_max = (target_water - (beta_0 + seasonal_peak)) / beta_1  #  + beta_4 * year_index_guess
 
             # 3️⃣ Convert population to year/month
             P0 = df["population"].iloc[-1]  # last known population
@@ -3118,29 +3118,37 @@ def balance_plot_calc(area_id):
             print("Max production occurs at population:", int(pop_max))
             print("Predicted year/month:", year, month)
 
-            return None
+            return jsonify({"response": "Done!"})
         else:
-            # Financial year calculating expression
-            financial_year = case(
+            financial_year_expr = case(
                 (TechnologyBill.bill_month >= 7, TechnologyBill.bill_year),
                 else_=TechnologyBill.bill_year - 1
-            ).label("financial_year")
+            )
 
-            results = (
+            subq = (
                 db.session.query(
-                    financial_year,
-                    func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                    financial_year_expr.label("financial_year"),
+                    TechnologyBill.technology_water_amount.label("water_amount")
                 )
                 .join(TechnologyBill.station)
                 .filter(
                     Station.station_type == "مياة",
+                    Station.area_id == area_id,
                     TechnologyBill.technology_water_amount.isnot(None),
-                    Station.area_id == area_id
                 )
-                .group_by(financial_year)
-                .order_by(financial_year)
+                .subquery()
+            )
+
+            results = (
+                db.session.query(
+                    subq.c.financial_year,
+                    func.sum(subq.c.water_amount).label("total_water")
+                )
+                .group_by(subq.c.financial_year)
+                .order_by(subq.c.financial_year)
                 .all()
             )
+
             year_water_list = [
                 {
                     "financial_year": int(year),
@@ -3169,8 +3177,8 @@ def balance_plot_calc(area_id):
                                  ** (1 / (p0.population_year - p1.population_year))
                                  - 1
                          ) * 100
-
-                g_rate = min(2.5, max(1.0, g_rate))
+                if data["is_modified"]:
+                    g_rate = min(2.5, max(1.0, g_rate))
 
                 place_data[p.place_id] = {
                     "base_year": p0.population_year,
@@ -3201,13 +3209,14 @@ def balance_plot_calc(area_id):
                         else:
                             water_need += pop_i * 100 / 1000
                     else:
-                        water_need += pop_i * data[p.place_id] / 1000
+                        water_need += pop_i * data[f"{p.place_type_id}"] / 1000
 
                 production = year_water_dict.get(i, year_water_dict[max(year_water_dict)])
 
                 rows.append({
                     "year": i,
                     "water_need": water_need,
+                    "population": total_pop,
                     "Q_demanded_monthly_min": water_need * 1.1,
                     "Q_demanded_monthly_avg": water_need * 1.2,
                     "Q_demanded_monthly_max": water_need * 1.5,
@@ -3238,6 +3247,9 @@ def balance_plot_calc(area_id):
                 })
 
             df = pd.DataFrame(rows)
+            pd.set_option('display.max_columns', None)
+            pd.options.display.float_format = '{:,.5f}'.format
+            print(df.head())
             fig, ax = plt.subplots(figsize=(12, 7))
 
             # --------------------
@@ -3340,7 +3352,7 @@ def balance_plot_calc(area_id):
             plt.tight_layout()
             plt.show()
 
-            return None
+            return jsonify({"response": "done!"})
 
     return jsonify(all_place_types_list)
 
