@@ -3209,29 +3209,19 @@ def balance_plot_calc(area_id, current_user):
                 else_=TechnologyBill.bill_year - 1
             )
 
-            days_in_month = func.day(
-                func.eomonth(
-                    func.datefromparts(
-                        TechnologyBill.bill_year,
-                        TechnologyBill.bill_month,
-                        1
-                    )
-                )
-            )
-
+            # Aggregate water per month first
             subq = (
                 db.session.query(
                     financial_year_expr.label("financial_year"),
-                    TechnologyBill.bill_year,
-                    TechnologyBill.bill_month,
-                    func.sum(TechnologyBill.technology_water_amount).label("water_amount"),
-                    days_in_month.label("days_in_month")
+                    TechnologyBill.bill_year.label("bill_year"),
+                    TechnologyBill.bill_month.label("bill_month"),
+                    func.sum(TechnologyBill.technology_water_amount).label("water_amount")
                 )
                 .join(TechnologyBill.station)
                 .filter(
                     Station.station_type == "مياة",
                     Station.area_id == area_id,
-                    TechnologyBill.technology_water_amount.isnot(None),
+                    TechnologyBill.technology_water_amount.isnot(None)
                 )
                 .group_by(
                     financial_year_expr,
@@ -3241,21 +3231,35 @@ def balance_plot_calc(area_id, current_user):
                 .subquery()
             )
 
+            # Compute days in month after aggregation
+            days_in_month_expr = func.day(
+                func.eomonth(
+                    func.datefromparts(
+                        subq.c.bill_year,
+                        subq.c.bill_month,
+                        1
+                    )
+                )
+            )
+
+            # Sum water and total days per financial year
             results = (
                 db.session.query(
                     subq.c.financial_year,
                     func.sum(subq.c.water_amount).label("total_water"),
-                    func.sum(subq.c.days_in_month).label("total_days")
+                    func.sum(days_in_month_expr).label("total_days")
                 )
                 .group_by(subq.c.financial_year)
                 .order_by(subq.c.financial_year)
                 .all()
             )
 
+            # Build final list
             year_water_list = [
                 {
                     "financial_year": int(year),
-                    "total_water": float(total_water) / total_days
+                    "total_water": float(total_water) / total_days if total_days else 0,
+                    "total_days": total_days
                 }
                 for year, total_water, total_days in results
             ]
