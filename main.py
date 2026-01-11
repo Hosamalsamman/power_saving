@@ -21,7 +21,7 @@ import matplotlib
 import json
 import plotly.express as px
 
-# matplotlib.use("Agg")  # ← force headless, non‑GUI backend
+matplotlib.use("Agg")  # ← force headless, non‑GUI backend
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import io
@@ -516,90 +516,90 @@ def home():
         "sanitation": float(totals_per_type.sanitation or 0),
     }
 
-    if totals['power']:
-        current_month = datetime.now().month - 1
-        if current_month == 0:
-            current_month = 12
-            current_year -= 1
-        current_month_bills = db.session.query(TechnologyBill).filter(
-            TechnologyBill.bill_month == 9,
-            TechnologyBill.bill_year == current_year).all()
-        over_power_consump = []
-        over_chlorine_consump = []
-        over_solid_alum_consump = []
-        over_liquid_alum_consump = []
-        over_power_for_0_water = []
-        for bill in current_month_bills:
-            if bill.power_per_water:
-                if bill.technology_water_amount and bill.technology_bill_percentage and (
-                        bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water):
-                    over_power_consump.append(bill.to_dict())
-                if bill.technology_water_amount and bill.chlorine_range_to and (
-                        (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (
-                        bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from):
-                    over_chlorine_consump.append(bill.to_dict())
-                if bill.technology_water_amount and bill.solid_alum_range_to and ((
-                                                         bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (
-                                                         bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from):
-                    over_solid_alum_consump.append(bill.to_dict())
-                if bill.technology_water_amount and bill.liquid_alum_range_to and ((
-                                                          bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
-                                                          bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from):
-                    over_liquid_alum_consump.append(bill.to_dict())
-                elif bill.technology_water_amount == 0 and bill.technology_power_consump > 1200:
-                    over_power_for_0_water.append(bill.to_dict())
-        # query with group by station to compare with water capacity
-        query = (
-            db.session.query(
-                TechnologyBill.station_id,
-                TechnologyBill.bill_year,
-                TechnologyBill.bill_month,
-                func.sum(TechnologyBill.technology_water_amount).label("total_water"),
-                Station.station_name,
-                Station.station_water_capacity,
-            )
-            .join(TechnologyBill.station)
-            .filter(TechnologyBill.bill_year == current_year)
-            .filter(TechnologyBill.bill_month == current_month)
-            .filter(TechnologyBill.technology_water_amount.isnot(None))
-            .group_by(
-                TechnologyBill.station_id,
-                TechnologyBill.bill_year,
-                TechnologyBill.bill_month,
-                Station.station_name,
-                Station.station_water_capacity,
-            )
-            .having(func.sum(TechnologyBill.technology_water_amount) > Station.station_water_capacity * 30)
+    # if totals['power']:
+    current_month = datetime.now().month - 1
+    if current_month == 0:
+        current_month = 12
+        current_year -= 1
+    current_month_bills = db.session.query(TechnologyBill).filter(
+        TechnologyBill.bill_month == 7,
+        TechnologyBill.bill_year == current_year).all()
+    over_power_consump = []
+    over_chlorine_consump = []
+    over_solid_alum_consump = []
+    over_liquid_alum_consump = []
+    over_power_for_0_water = []
+    for bill in current_month_bills:
+        if bill.power_per_water:
+            if bill.technology_water_amount and bill.technology_bill_percentage and (
+                    bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water):
+                over_power_consump.append(bill.to_dict())
+            if bill.technology_water_amount and bill.chlorine_range_to and (
+                    (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (
+                    bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from):
+                over_chlorine_consump.append(bill.to_dict())
+            if bill.technology_water_amount and bill.solid_alum_range_to and ((
+                                                     bill.technology_solid_alum_consump / bill.technology_water_amount) > bill.solid_alum_range_to or (
+                                                     bill.technology_solid_alum_consump / bill.technology_water_amount) < bill.solid_alum_range_from):
+                over_solid_alum_consump.append(bill.to_dict())
+            if bill.technology_water_amount and bill.liquid_alum_range_to and ((
+                                                      bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
+                                                      bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from):
+                over_liquid_alum_consump.append(bill.to_dict())
+            elif bill.technology_water_amount == 0 and bill.technology_power_consump > 1200:
+                over_power_for_0_water.append(bill.to_dict())
+    # query with group by station to compare with water capacity
+    query = (
+        db.session.query(
+            TechnologyBill.station_id,
+            TechnologyBill.bill_year,
+            TechnologyBill.bill_month,
+            func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+            Station.station_name,
+            Station.station_water_capacity,
         )
-        bills = query.all()
-        over_water_bills_list = [
-            {
-                "station_name": bill.station_name,
-                "year": bill.bill_year,
-                "month": bill.bill_month,
-                "total_water": float(bill.total_water) if bill.total_water else 0,
-                "water_capacity": bill.station_water_capacity,
-                "capacity_limit": bill.station_water_capacity * 30
-            } for bill in bills
-        ]
-
-        return jsonify(
-            power=totals['power'],
-            water=totals['water'],
-            sanitation=totals['sanitation'],
-            money=totals['money'],
-            chlorine=totals['chlorine'],
-            solid_alum=totals['solid_alum'],
-            liquid_alum=totals['liquid_alum'],
-            over_power_consump=over_power_consump,
-            over_chlorine_consump=over_chlorine_consump,
-            over_solid_alum_consump=over_solid_alum_consump,
-            over_liquid_alum_consump=over_liquid_alum_consump,
-            over_water_stations=over_water_bills_list,
-            over_power_for_0_water=over_power_for_0_water,
+        .join(TechnologyBill.station)
+        .filter(TechnologyBill.bill_year == current_year)
+        .filter(TechnologyBill.bill_month == current_month)
+        .filter(TechnologyBill.technology_water_amount.isnot(None))
+        .group_by(
+            TechnologyBill.station_id,
+            TechnologyBill.bill_year,
+            TechnologyBill.bill_month,
+            Station.station_name,
+            Station.station_water_capacity,
         )
+        .having(func.sum(TechnologyBill.technology_water_amount) > Station.station_water_capacity * 30)
+    )
+    bills = query.all()
+    over_water_bills_list = [
+        {
+            "station_name": bill.station_name,
+            "year": bill.bill_year,
+            "month": bill.bill_month,
+            "total_water": float(bill.total_water) if bill.total_water else 0,
+            "water_capacity": bill.station_water_capacity,
+            "capacity_limit": bill.station_water_capacity * 30
+        } for bill in bills
+    ]
 
-    return jsonify({"message": "برجاء تسجيل الفواتير لمتابعة الاستهلاكات السنوية"})
+    return jsonify(
+        power=totals['power'],
+        water=totals['water'],
+        sanitation=totals['sanitation'],
+        money=totals['money'],
+        chlorine=totals['chlorine'],
+        solid_alum=totals['solid_alum'],
+        liquid_alum=totals['liquid_alum'],
+        over_power_consump=over_power_consump,
+        over_chlorine_consump=over_chlorine_consump,
+        over_solid_alum_consump=over_solid_alum_consump,
+        over_liquid_alum_consump=over_liquid_alum_consump,
+        over_water_stations=over_water_bills_list,
+        over_power_for_0_water=over_power_for_0_water,
+    )
+
+    # return jsonify({"message": "برجاء تسجيل الفواتير لمتابعة الاستهلاكات السنوية"})
 
 
 
@@ -625,6 +625,7 @@ def edit_station(station_id, current_user):
         station.station_type = data['station_type']
         station.station_water_capacity = data['station_water_capacity']
         station.water_source_id = data['water_source_id']
+        station.area_id = data['area_id']
 
         try:
             db.session.commit()
@@ -671,6 +672,7 @@ def add_new_station(current_user):
             station_type=data['station_type'],
             station_water_capacity=data['station_water_capacity'],
             water_source_id=data['water_source_id'],
+            area_id=data['area_id'],
         )
         db.session.add(new_station)
         try:
@@ -2722,12 +2724,90 @@ def show_reports(current_user):
 
 
 # Planning sector routes
+@app.route("/all-areas")
+@private_route([1, 5])
+def all_areas(current_user):
+    areas = db.session.query(AreaOfService).all()
+    areas_list = [area.to_dict() for area in areas]
+    # print(areas_list)
+    return jsonify(areas_list)
+
+
+@app.route("/edit-area/<area_id>", methods=["GET","POST"])
+@private_route([1, 5])
+def edit_area(area_id, current_user):
+    current_area = db.session.get(AreaOfService, area_id)
+    if request.method == "POST":
+        data = request.get_json()
+        current_area.area_name = data["area_name"]
+        current_area.increasable = data["increasable"]
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم تعديل البيانات بنجاح"
+                }
+            }
+            return jsonify(response), 200
+
+    return jsonify(current_area)
+
+
+@app.route("/new-area", methods=["GET","POST"])
+@private_route([1, 5])
+def add_new_area(current_user):
+    if request.method == "POST":
+        data = request.get_json()
+        new_area = AreaOfService(
+            area_name=data["area_name"],
+            increasable=data["increasable"],
+        )
+        db.session.add(new_area)
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم إضافة منطقة الخدمة بنجاح"
+                }
+            }
+            return jsonify(response), 200
+    return jsonify({"response": "يا حي يا قيوم برحمتك أستغيث أصلح لي شأني كله ولا تكلني إلى نفسي طرفة عين"})
+
+
 @app.route("/place-types")
 @private_route([1, 5])
 def place_types(current_user):
     all_types = db.session.query(PlaceType).all()
     all_types_list = [p_type.to_dict() for p_type in all_types]
-    print(all_types_list)
+    # print(all_types_list)
     return jsonify(all_types_list)
 
 
@@ -2955,13 +3035,17 @@ def add_new_population(place_id, current_user):
 
 
 @app.route("/balance-plot-calc/<area_id>", methods=["GET", "POST"])
-# @private_route([1, 5])
-def balance_plot_calc(area_id):
+@private_route([1, 5])
+def balance_plot_calc(area_id, current_user):
     current_area = db.session.get(AreaOfService, area_id)
+    current_area_data = current_area.to_dict()
+    current_area_data["stations"] = [station.to_dict() for station in current_area.stations]
+    current_area_data["places"] = [place.to_dict() for place in current_area.places]
     all_place_types = db.session.query(PlaceType).all()
     all_place_types_list = [p_type.to_dict() for p_type in all_place_types]
     if request.method == "POST":
         data = request.get_json()
+        print(data)
         total_stations_capacity = 0
         for station in current_area.stations:
             total_stations_capacity += station.station_water_capacity
@@ -3125,10 +3209,23 @@ def balance_plot_calc(area_id):
                 else_=TechnologyBill.bill_year - 1
             )
 
+            days_in_month = func.day(
+                func.eomonth(
+                    func.datefromparts(
+                        TechnologyBill.bill_year,
+                        TechnologyBill.bill_month,
+                        1
+                    )
+                )
+            )
+
             subq = (
                 db.session.query(
                     financial_year_expr.label("financial_year"),
-                    TechnologyBill.technology_water_amount.label("water_amount")
+                    TechnologyBill.bill_year,
+                    TechnologyBill.bill_month,
+                    func.sum(TechnologyBill.technology_water_amount).label("water_amount"),
+                    days_in_month.label("days_in_month")
                 )
                 .join(TechnologyBill.station)
                 .filter(
@@ -3136,13 +3233,19 @@ def balance_plot_calc(area_id):
                     Station.area_id == area_id,
                     TechnologyBill.technology_water_amount.isnot(None),
                 )
+                .group_by(
+                    financial_year_expr,
+                    TechnologyBill.bill_year,
+                    TechnologyBill.bill_month
+                )
                 .subquery()
             )
 
             results = (
                 db.session.query(
                     subq.c.financial_year,
-                    func.sum(subq.c.water_amount).label("total_water")
+                    func.sum(subq.c.water_amount).label("total_water"),
+                    func.sum(subq.c.days_in_month).label("total_days")
                 )
                 .group_by(subq.c.financial_year)
                 .order_by(subq.c.financial_year)
@@ -3152,10 +3255,11 @@ def balance_plot_calc(area_id):
             year_water_list = [
                 {
                     "financial_year": int(year),
-                    "total_water": float(total_water) / 366
+                    "total_water": float(total_water) / total_days
                 }
-                for year, total_water in results
+                for year, total_water, total_days in results
             ]
+
             year_water_dict = {
                 item["financial_year"]: item["total_water"]
                 for item in year_water_list
@@ -3188,7 +3292,7 @@ def balance_plot_calc(area_id):
 
             rows = []
 
-            for i in range(year_water_list[0]["financial_year"], data["goal_year"]):
+            for i in range(year_water_list[0]["financial_year"], data["goal_year"] + 1):
                 water_need = 0
                 total_pop = 0
 
@@ -3197,19 +3301,20 @@ def balance_plot_calc(area_id):
                     pop_i = d["base_pop"] * ((1 + d["g_rate"] / 100) ** (i - d["base_year"]))
                     total_pop += pop_i
 
-                    if data["calc_type"] == "equation":
-                        if pop_i > 40000:
-                            water_need += pop_i * 150 / 1000
-                        elif pop_i > 30000:
-                            water_need += pop_i * 130 / 1000
-                        elif pop_i > 20000:
-                            water_need += pop_i * 120 / 1000
-                        elif pop_i > 10000:
-                            water_need += pop_i * 110 / 1000
+                    if pop_i > 0:
+                        if data["calc_type"] == "equation":
+                            if d["base_pop"] > 40000:
+                                water_need += pop_i * 150 / 1000
+                            elif d["base_pop"] > 30000:
+                                water_need += pop_i * 130 / 1000
+                            elif d["base_pop"] > 20000:
+                                water_need += pop_i * 120 / 1000
+                            elif d["base_pop"] > 10000:
+                                water_need += pop_i * 110 / 1000
+                            else:
+                                water_need += pop_i * 100 / 1000
                         else:
-                            water_need += pop_i * 100 / 1000
-                    else:
-                        water_need += pop_i * data[f"{p.place_type_id}"] / 1000
+                            water_need += pop_i * data[f"{p.place_type_id}"] / 1000
 
                 production = year_water_dict.get(i, year_water_dict[max(year_water_dict)])
 
@@ -3218,7 +3323,7 @@ def balance_plot_calc(area_id):
                     "water_need": water_need,
                     "population": total_pop,
                     "Q_demanded_monthly_min": water_need * 1.1,
-                    "Q_demanded_monthly_avg": water_need * 1.2,
+                    "Q_demanded_monthly_avg": water_need * 1.2 + data["increasable"] if current_area.increasable else water_need * 1.2,
                     "Q_demanded_monthly_max": water_need * 1.5,
                     "Q_demanded_daily_min": water_need * 1.2,
                     "Q_demanded_daily_avg": water_need * 1.5,
@@ -3350,14 +3455,25 @@ def balance_plot_calc(area_id):
             # Layout
             # --------------------
             plt.tight_layout()
-            plt.show()
+            # Save to BytesIO buffer
+            img = io.BytesIO()
+            plt.savefig(img, format='png', dpi=200, bbox_inches='tight')
+            img.seek(0)  # Rewind the buffer
 
-            return jsonify({"response": "done!"})
+            # Encode image to Base64
+            chart_base64 = base64.b64encode(img.read()).decode('utf-8')
+
+            return jsonify(
+                {
+                    "table": rows,
+                    "chart": chart_base64,
+                    "area_data": current_area_data
+                }
+            )
 
     return jsonify(all_place_types_list)
 
 # End of planning sector routes
-
 
 
 @app.route("/register", methods=["GET", "POST"])

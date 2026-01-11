@@ -326,12 +326,14 @@ class AreaOfService(db.Model):
 
     area_id = db.Column(Integer, primary_key=True)
     area_name = db.Column(NVARCHAR(200), unique=True, nullable=False)
+    increasable = db.Column(Boolean, nullable=False)
 
     places = db.relationship('Place', back_populates='area')
     stations = db.relationship('Station', back_populates='area')
 
     def to_dict(self):
-        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        return data
 
 
 class PlaceType(db.Model):
@@ -387,7 +389,9 @@ class PlacePopulation(db.Model):
     place = db.relationship('Place', back_populates='populations')
 
     def to_dict(self):
-        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        data['place_name'] = self.place.place_name if self.place else None
+        return data
 
 
 
