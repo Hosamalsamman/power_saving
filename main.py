@@ -604,7 +604,7 @@ def home():
 
 
 @app.route("/stations")
-@private_route([1, 2, 3])
+@private_route([1, 2, 3, 6])
 def stations(current_user):
     # print(current_user.emp_code) pass current_user as input to func to access the object
     all_stations = db.session.query(Station).all()
@@ -613,7 +613,7 @@ def stations(current_user):
 
 
 @app.route("/edit-station/<station_id>", methods=["GET", "POST"])
-@private_route([1, 2])
+@private_route([1, 2, 6])
 def edit_station(station_id, current_user):
     station = db.session.get(Station, station_id)
 
@@ -705,7 +705,7 @@ def add_new_station(current_user):
 
 
 @app.route("/technologies")
-@private_route([1, 2, 3])
+@private_route([1, 2, 3, 6])
 def technologies(current_user):
     all_techs = db.session.query(Technology).all()
     techs_list = [tech.to_dict() for tech in all_techs]
@@ -1387,7 +1387,7 @@ def edit_tech_bill(tech_bill_id, current_user):
 
 
 @app.route("/view-tech-bills", methods=["GET"])
-@private_route([1, 2, 3])
+@private_route([1, 2, 3, 6])
 def view_tech_bills(current_user):
     tech_bills = db.session.query(TechnologyBill).filter(TechnologyBill.technology_bill_percentage.isnot(None)).all()
     t_b_list = [bill.to_dict() for bill in tech_bills]
@@ -1545,7 +1545,7 @@ def edit_voltage_cost(voltage_id, current_user):
 
 
 @app.route("/chemicals")
-@private_route([1, 4])
+@private_route([1, 4, 6])
 def chemicals(current_user):
     chemicals = db.session.query(AlumChlorineReference).all()
     userschemicals_list = [chemical.to_dict() for chemical in chemicals]
@@ -2342,7 +2342,7 @@ def new_annual_bill(meter_id, current_user):
 
 
 @app.route("/prediction/<station_id>", methods=["GET", "POST"])
-@private_route([1, 2])
+@private_route([1, 2, 6])
 def predict(station_id, current_user):
     if request.method == "POST":
         station_bills = db.session.query(TechnologyBill).filter(
@@ -2440,7 +2440,7 @@ def predict(station_id, current_user):
 
 
 @app.route("/reports", methods=["GET", "POST"])
-@private_route([1, 2, 3, 4])
+@private_route([1, 2, 3, 4, 6])
 def show_reports(current_user):
     if request.method == "POST":
         data = request.get_json()
@@ -2517,6 +2517,84 @@ def show_reports(current_user):
                 {
                     "branch_name": bill.branch_name,
                     "total_bill": float(bill.total_bill) if bill.total_bill else 0,
+                    "total_water": float(bill.total_water) if bill.total_water else 0,
+                    "total_power": float(bill.total_power) if bill.total_power else 0,
+                    "total_chlorine": float(bill.total_chlorine) if bill.total_chlorine else 0,
+                    "total_liquid_alum": float(bill.total_liquid_alum) if bill.total_liquid_alum else 0,
+                    "total_solid_alum": float(bill.total_solid_alum) if bill.total_solid_alum else 0,
+
+                } for bill in bills
+            ]
+            # print(bills_list)
+            return jsonify(bills_list)
+        elif data['report_name'] == "station_per_month":
+            # Use parentheses instead of backslashes
+            query = db.session.query(
+                Branch.branch_name,
+                Station.station_name,
+                TechnologyBill.station_id,
+                TechnologyBill.bill_year,
+                TechnologyBill.bill_month,
+                func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                func.sum(TechnologyBill.technology_power_consump).label("total_power"),
+                func.sum(TechnologyBill.technology_chlorine_consump).label("total_chlorine"),
+                func.sum(TechnologyBill.technology_liquid_alum_consump).label("total_liquid_alum"),
+                func.sum(TechnologyBill.technology_solid_alum_consump).label("total_solid_alum")
+            )
+            # Complex date range across years
+            query = query.filter(
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month)
+                .between(from_key, to_key)
+            )
+            query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
+            query = query.join(TechnologyBill.station)
+            query = query.join(Station.branch)
+            query = query.group_by(TechnologyBill.station_id, TechnologyBill.bill_year, TechnologyBill.bill_month)
+            bills = query.all()
+
+            bills_list = [
+                {
+                    "branch_name": bill.branch_name,
+                    "station_name": bill.station_name,
+                    "year": bill.bill_year,
+                    "month": bill.bill_month,
+                    "total_water": float(bill.total_water) if bill.total_water else 0,
+                    "total_power": float(bill.total_power) if bill.total_power else 0,
+                    "total_chlorine": float(bill.total_chlorine) if bill.total_chlorine else 0,
+                    "total_liquid_alum": float(bill.total_liquid_alum) if bill.total_liquid_alum else 0,
+                    "total_solid_alum": float(bill.total_solid_alum) if bill.total_solid_alum else 0,
+
+                } for bill in bills
+            ]
+            # print(bills_list)
+            return jsonify(bills_list)
+        elif data['report_name'] == "station_total":
+            # Use parentheses instead of backslashes
+            query = db.session.query(
+                Branch.branch_name,
+                Station.station_name,
+                TechnologyBill.station_id,
+                func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                func.sum(TechnologyBill.technology_power_consump).label("total_power"),
+                func.sum(TechnologyBill.technology_chlorine_consump).label("total_chlorine"),
+                func.sum(TechnologyBill.technology_liquid_alum_consump).label("total_liquid_alum"),
+                func.sum(TechnologyBill.technology_solid_alum_consump).label("total_solid_alum")
+            )
+            # Complex date range across years
+            query = query.filter(
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month)
+                .between(from_key, to_key)
+            )
+            query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
+            query = query.join(TechnologyBill.station)
+            query = query.join(Station.branch)
+            query = query.group_by(TechnologyBill.station_id)
+            bills = query.all()
+
+            bills_list = [
+                {
+                    "branch_name": bill.branch_name,
+                    "station_name": bill.station_name,
                     "total_water": float(bill.total_water) if bill.total_water else 0,
                     "total_power": float(bill.total_power) if bill.total_power else 0,
                     "total_chlorine": float(bill.total_chlorine) if bill.total_chlorine else 0,
@@ -2720,12 +2798,332 @@ def show_reports(current_user):
             ]
             # print(bills_list)
             return jsonify(bills_list)
+            # ========== OVER POWER CONSUMPTION REPORT ==========
+        elif data['report_name'] == "over_power_consumption":
+            query = db.session.query(
+                Station.station_name,
+                Branch.branch_name,
+                Technology.technology_name,
+                TechnologyBill.bill_year,
+                TechnologyBill.bill_month,
+                TechnologyBill.technology_water_amount,
+                TechnologyBill.technology_power_consump,
+                TechnologyBill.power_per_water.label("expected_ratio"),
+                (TechnologyBill.technology_power_consump / TechnologyBill.technology_water_amount).label("actual_ratio")
+            )
+
+            # Apply filters
+            query = query.filter(
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month).between(from_key, to_key),
+                TechnologyBill.technology_water_amount.isnot(None),
+                TechnologyBill.technology_water_amount > 0,
+                TechnologyBill.technology_power_consump.isnot(None),
+                TechnologyBill.power_per_water.isnot(None),
+                TechnologyBill.technology_bill_percentage.isnot(None),
+                # Check if actual ratio exceeds expected
+                (
+                            TechnologyBill.technology_power_consump / TechnologyBill.technology_water_amount) > TechnologyBill.power_per_water
+            )
+
+            query = query.join(TechnologyBill.station)
+            query = query.join(Station.branch)
+            query = query.join(TechnologyBill.technology)
+            query = query.order_by(TechnologyBill.bill_year.desc(), TechnologyBill.bill_month.desc())
+
+            results = query.all()
+            return jsonify([
+                {
+                    "station_name": r.station_name,
+                    "branch_name": r.branch_name,
+                    "technology_name": r.technology_name,
+                    "year": r.bill_year,
+                    "month": r.bill_month,
+                    "water_amount": float(r.technology_water_amount),
+                    "power_consumption": float(r.technology_power_consump),
+                    "expected_ratio": float(r.expected_ratio),
+                    "actual_ratio": float(r.actual_ratio),
+                    "excess_percentage": float((r.actual_ratio - r.expected_ratio) / r.expected_ratio * 100)
+                } for r in results
+            ])
+
+        # ========== OVER CHLORINE CONSUMPTION REPORT ==========
+        elif data['report_name'] == "over_chlorine_consumption":
+            query = db.session.query(
+                Station.station_name,
+                Branch.branch_name,
+                Technology.technology_name,
+                TechnologyBill.bill_year,
+                TechnologyBill.bill_month,
+                TechnologyBill.technology_water_amount,
+                TechnologyBill.technology_chlorine_consump,
+                TechnologyBill.chlorine_range_from.label("min_ratio"),
+                TechnologyBill.chlorine_range_to.label("max_ratio"),
+                (TechnologyBill.technology_chlorine_consump / TechnologyBill.technology_water_amount).label(
+                    "actual_ratio")
+            )
+
+            query = query.filter(
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month).between(from_key, to_key),
+                TechnologyBill.technology_water_amount.isnot(None),
+                TechnologyBill.technology_water_amount > 0,
+                TechnologyBill.technology_chlorine_consump.isnot(None),
+                TechnologyBill.chlorine_range_to.isnot(None),
+                TechnologyBill.chlorine_range_from.isnot(None),
+                or_(
+                    (
+                                TechnologyBill.technology_chlorine_consump / TechnologyBill.technology_water_amount) > TechnologyBill.chlorine_range_to,
+                    (
+                                TechnologyBill.technology_chlorine_consump / TechnologyBill.technology_water_amount) < TechnologyBill.chlorine_range_from
+                )
+            )
+
+            query = query.join(TechnologyBill.station)
+            query = query.join(Station.branch)
+            query = query.join(TechnologyBill.technology)
+            query = query.order_by(TechnologyBill.bill_year.desc(), TechnologyBill.bill_month.desc())
+
+            results = query.all()
+            return jsonify([
+                {
+                    "station_name": r.station_name,
+                    "branch_name": r.branch_name,
+                    "technology_name": r.technology_name,
+                    "year": r.bill_year,
+                    "month": r.bill_month,
+                    "water_amount": float(r.technology_water_amount),
+                    "chlorine_consumption": float(r.technology_chlorine_consump),
+                    "min_ratio": float(r.min_ratio),
+                    "max_ratio": float(r.max_ratio),
+                    "actual_ratio": float(r.actual_ratio),
+                    "status": "above_range" if r.actual_ratio > r.max_ratio else "below_range"
+                } for r in results
+            ])
+
+        # ========== OVER SOLID ALUM CONSUMPTION REPORT ==========
+        elif data['report_name'] == "over_solid_alum_consumption":
+            query = db.session.query(
+                Station.station_name,
+                Branch.branch_name,
+                Technology.technology_name,
+                TechnologyBill.bill_year,
+                TechnologyBill.bill_month,
+                TechnologyBill.technology_water_amount,
+                TechnologyBill.technology_solid_alum_consump,
+                TechnologyBill.solid_alum_range_from.label("min_ratio"),
+                TechnologyBill.solid_alum_range_to.label("max_ratio"),
+                (TechnologyBill.technology_solid_alum_consump / TechnologyBill.technology_water_amount).label(
+                    "actual_ratio")
+            )
+
+            query = query.filter(
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month).between(from_key, to_key),
+                TechnologyBill.technology_water_amount.isnot(None),
+                TechnologyBill.technology_water_amount > 0,
+                TechnologyBill.technology_solid_alum_consump.isnot(None),
+                TechnologyBill.solid_alum_range_to.isnot(None),
+                TechnologyBill.solid_alum_range_from.isnot(None),
+                or_(
+                    (
+                                TechnologyBill.technology_solid_alum_consump / TechnologyBill.technology_water_amount) > TechnologyBill.solid_alum_range_to,
+                    (
+                                TechnologyBill.technology_solid_alum_consump / TechnologyBill.technology_water_amount) < TechnologyBill.solid_alum_range_from
+                )
+            )
+
+            query = query.join(TechnologyBill.station)
+            query = query.join(Station.branch)
+            query = query.join(TechnologyBill.technology)
+            query = query.order_by(TechnologyBill.bill_year.desc(), TechnologyBill.bill_month.desc())
+
+            results = query.all()
+            return jsonify([
+                {
+                    "station_name": r.station_name,
+                    "branch_name": r.branch_name,
+                    "technology_name": r.technology_name,
+                    "year": r.bill_year,
+                    "month": r.bill_month,
+                    "water_amount": float(r.technology_water_amount),
+                    "solid_alum_consumption": float(r.technology_solid_alum_consump),
+                    "min_ratio": float(r.min_ratio),
+                    "max_ratio": float(r.max_ratio),
+                    "actual_ratio": float(r.actual_ratio),
+                    "status": "above_range" if r.actual_ratio > r.max_ratio else "below_range"
+                } for r in results
+            ])
+
+        # ========== OVER LIQUID ALUM CONSUMPTION REPORT ==========
+        elif data['report_name'] == "over_liquid_alum_consumption":
+            query = db.session.query(
+                Station.station_name,
+                Branch.branch_name,
+                Technology.technology_name,
+                TechnologyBill.bill_year,
+                TechnologyBill.bill_month,
+                TechnologyBill.technology_water_amount,
+                TechnologyBill.technology_liquid_alum_consump,
+                TechnologyBill.liquid_alum_range_from.label("min_ratio"),
+                TechnologyBill.liquid_alum_range_to.label("max_ratio"),
+                (TechnologyBill.technology_liquid_alum_consump / TechnologyBill.technology_water_amount).label(
+                    "actual_ratio")
+            )
+
+            query = query.filter(
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month).between(from_key, to_key),
+                TechnologyBill.technology_water_amount.isnot(None),
+                TechnologyBill.technology_water_amount > 0,
+                TechnologyBill.technology_liquid_alum_consump.isnot(None),
+                TechnologyBill.liquid_alum_range_to.isnot(None),
+                TechnologyBill.liquid_alum_range_from.isnot(None),
+                or_(
+                    (
+                                TechnologyBill.technology_liquid_alum_consump / TechnologyBill.technology_water_amount) > TechnologyBill.liquid_alum_range_to,
+                    (
+                                TechnologyBill.technology_liquid_alum_consump / TechnologyBill.technology_water_amount) < TechnologyBill.liquid_alum_range_from
+                )
+            )
+
+            query = query.join(TechnologyBill.station)
+            query = query.join(Station.branch)
+            query = query.join(TechnologyBill.technology)
+            query = query.order_by(TechnologyBill.bill_year.desc(), TechnologyBill.bill_month.desc())
+
+            results = query.all()
+            return jsonify([
+                {
+                    "station_name": r.station_name,
+                    "branch_name": r.branch_name,
+                    "technology_name": r.technology_name,
+                    "year": r.bill_year,
+                    "month": r.bill_month,
+                    "water_amount": float(r.technology_water_amount),
+                    "liquid_alum_consumption": float(r.technology_liquid_alum_consump),
+                    "min_ratio": float(r.min_ratio),
+                    "max_ratio": float(r.max_ratio),
+                    "actual_ratio": float(r.actual_ratio),
+                    "status": "above_range" if r.actual_ratio > r.max_ratio else "below_range"
+                } for r in results
+            ])
+
+        # ========== POWER CONSUMPTION WITH ZERO WATER REPORT ==========
+        elif data['report_name'] == "power_for_zero_water":
+            query = db.session.query(
+                Station.station_name,
+                Branch.branch_name,
+                Technology.technology_name,
+                TechnologyBill.bill_year,
+                TechnologyBill.bill_month,
+                TechnologyBill.technology_water_amount,
+                TechnologyBill.technology_power_consump
+            )
+
+            query = query.filter(
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month).between(from_key, to_key),
+                or_(
+                    TechnologyBill.technology_water_amount == 0,
+                    TechnologyBill.technology_water_amount.is_(None)
+                ),
+                TechnologyBill.technology_power_consump.isnot(None),
+                TechnologyBill.technology_power_consump > 1200  # Threshold for abnormal power consumption
+            )
+
+            query = query.join(TechnologyBill.station)
+            query = query.join(Station.branch)
+            query = query.join(TechnologyBill.technology)
+            query = query.order_by(TechnologyBill.technology_power_consump.desc())
+
+            results = query.all()
+            return jsonify([
+                {
+                    "station_name": r.station_name,
+                    "branch_name": r.branch_name,
+                    "technology_name": r.technology_name,
+                    "year": r.bill_year,
+                    "month": r.bill_month,
+                    "water_amount": float(r.technology_water_amount) if r.technology_water_amount else 0,
+                    "power_consumption": float(r.technology_power_consump),
+                    "issue": "High power consumption with zero water production"
+                } for r in results
+            ])
+
+        # ========== ALL ANOMALIES SUMMARY REPORT ==========
+        elif data['report_name'] == "all_anomalies_summary":
+            # Create a union of all anomaly queries
+            anomalies = []
+
+            # 1. Power anomalies
+            power_query = db.session.query(
+                Station.station_name,
+                Branch.branch_name,
+                Technology.technology_name,
+                TechnologyBill.bill_year,
+                TechnologyBill.bill_month,
+                func.literal("Power Consumption").label("anomaly_type"),
+                (TechnologyBill.technology_power_consump / TechnologyBill.technology_water_amount).label(
+                    "actual_value"),
+                TechnologyBill.power_per_water.label("expected_value")
+            ).filter(
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month).between(from_key, to_key),
+                TechnologyBill.technology_water_amount > 0,
+                TechnologyBill.power_per_water.isnot(None),
+                TechnologyBill.technology_bill_percentage.isnot(None),
+                (
+                            TechnologyBill.technology_power_consump / TechnologyBill.technology_water_amount) > TechnologyBill.power_per_water
+            ).join(TechnologyBill.station).join(Station.branch).join(TechnologyBill.technology)
+
+            anomalies.extend([{
+                "station_name": r.station_name,
+                "branch_name": r.branch_name,
+                "technology_name": r.technology_name,
+                "year": r.bill_year,
+                "month": r.bill_month,
+                "anomaly_type": r.anomaly_type,
+                "actual_value": float(r.actual_value),
+                "expected_value": float(r.expected_value),
+                "deviation_percentage": float((r.actual_value - r.expected_value) / r.expected_value * 100)
+            } for r in power_query.all()])
+
+            # 2. Zero water with power
+            zero_water_query = db.session.query(
+                Station.station_name,
+                Branch.branch_name,
+                Technology.technology_name,
+                TechnologyBill.bill_year,
+                TechnologyBill.bill_month,
+                func.literal("Zero Water Production").label("anomaly_type"),
+                TechnologyBill.technology_power_consump.label("actual_value")
+            ).filter(
+                (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month).between(from_key, to_key),
+                TechnologyBill.technology_water_amount == 0,
+                TechnologyBill.technology_bill_percentage.isnot(None),
+                TechnologyBill.technology_power_consump > 1200
+            ).join(TechnologyBill.station).join(Station.branch).join(TechnologyBill.technology)
+
+            anomalies.extend([{
+                "station_name": r.station_name,
+                "branch_name": r.branch_name,
+                "technology_name": r.technology_name,
+                "year": r.bill_year,
+                "month": r.bill_month,
+                "anomaly_type": r.anomaly_type,
+                "actual_value": float(r.actual_value),
+                "expected_value": 0.0,
+                "deviation_percentage": 100.0
+            } for r in zero_water_query.all()])
+
+            # Sort by year, month desc
+            anomalies.sort(key=lambda x: (x['year'], x['month']), reverse=True)
+
+            return jsonify(anomalies)
+
+        else:
+            return jsonify({"error": "Invalid report name"}), 400
     return jsonify({"response": "سبحان الله وبحمده"})   # current_user.group.to_dict()
 
 
 # Planning sector routes
 @app.route("/all-areas")
-@private_route([1, 5])
+@private_route([1, 5, 6])
 def all_areas(current_user):
     areas = db.session.query(AreaOfService).all()
     areas_list = [area.to_dict() for area in areas]
@@ -2803,7 +3201,7 @@ def add_new_area(current_user):
 
 
 @app.route("/place-types")
-@private_route([1, 5])
+@private_route([1, 5, 6])
 def place_types(current_user):
     all_types = db.session.query(PlaceType).all()
     all_types_list = [p_type.to_dict() for p_type in all_types]
@@ -2848,7 +3246,7 @@ def edit_place_type(place_type_id, current_user):
 
 
 @app.route("/places")
-@private_route([1, 5])
+@private_route([1, 5, 6])
 def get_places(current_user):
     all_places = db.session.query(Place).all()
     all_places_list = [place.to_dict() for place in all_places]
@@ -3035,7 +3433,7 @@ def add_new_population(place_id, current_user):
 
 
 @app.route("/balance-plot-calc/<area_id>", methods=["GET", "POST"])
-@private_route([1, 5])
+@private_route([1, 5, 6])
 def balance_plot_calc(area_id, current_user):
     current_area = db.session.get(AreaOfService, area_id)
     current_area_data = current_area.to_dict()
