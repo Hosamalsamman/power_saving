@@ -439,7 +439,7 @@ class User(UserMixin, db.Model):
     __tablename__ = 'users'
     emp_code = db.Column(NVARCHAR(8), primary_key=True)
     emp_name = db.Column(NVARCHAR(400), unique=True, nullable=False)
-    username = db.Column(NVARCHAR(30), unique=True)
+    username = db.Column(NVARCHAR(30), unique=True, nullable=False)
     userpassword = db.Column(NVARCHAR(300), nullable=False)
     group_id = db.Column(Integer, db.ForeignKey('groups.group_id'))
     is_active = db.Column(Boolean, nullable=False)

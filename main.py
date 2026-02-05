@@ -476,7 +476,8 @@ def get_season(month):
 
 
 @app.route("/")
-def home():
+@private_route([1, 2, 3, 4, 5, 6])
+def home(current_user):
     current_year = datetime.now().year
     totals_per_type = (
         db.session.query(
@@ -522,8 +523,8 @@ def home():
         current_month = 12
         current_year -= 1
     current_month_bills = db.session.query(TechnologyBill).filter(
-        TechnologyBill.bill_month == 7,
-        TechnologyBill.bill_year == current_year).all()
+        TechnologyBill.bill_month == 9,
+        TechnologyBill.bill_year == 2025).all()
     over_power_consump = []
     over_chlorine_consump = []
     over_solid_alum_consump = []
@@ -625,7 +626,7 @@ def edit_station(station_id, current_user):
         station.station_type = data['station_type']
         station.station_water_capacity = data['station_water_capacity']
         station.water_source_id = data['water_source_id']
-        station.area_id = data['area_id']
+        station.area_id = data.get('area_id')
 
         try:
             db.session.commit()
@@ -672,7 +673,7 @@ def add_new_station(current_user):
             station_type=data['station_type'],
             station_water_capacity=data['station_water_capacity'],
             water_source_id=data['water_source_id'],
-            area_id=data['area_id'],
+            area_id=data.get('area_id'),
         )
         db.session.add(new_station)
         try:
@@ -2549,7 +2550,7 @@ def show_reports(current_user):
             query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
             query = query.join(TechnologyBill.station)
             query = query.join(Station.branch)
-            query = query.group_by(TechnologyBill.station_id, TechnologyBill.bill_year, TechnologyBill.bill_month)
+            query = query.group_by(TechnologyBill.station_id, TechnologyBill.bill_year, TechnologyBill.bill_month, Branch.branch_name, Station.station_name)
             bills = query.all()
 
             bills_list = [
@@ -2588,7 +2589,7 @@ def show_reports(current_user):
             query = query.filter(TechnologyBill.technology_bill_percentage.isnot(None))
             query = query.join(TechnologyBill.station)
             query = query.join(Station.branch)
-            query = query.group_by(TechnologyBill.station_id)
+            query = query.group_by(TechnologyBill.station_id, Branch.branch_name, Station.station_name)
             bills = query.all()
 
             bills_list = [
@@ -2895,7 +2896,7 @@ def show_reports(current_user):
                     "min_ratio": float(r.min_ratio),
                     "max_ratio": float(r.max_ratio),
                     "actual_ratio": float(r.actual_ratio),
-                    "status": "above_range" if r.actual_ratio > r.max_ratio else "below_range"
+                    "status": "أعلى من القيمة العظمى" if r.actual_ratio > r.max_ratio else "اقل من القيمة الصغرى"
                 } for r in results
             ])
 
@@ -2948,7 +2949,7 @@ def show_reports(current_user):
                     "min_ratio": float(r.min_ratio),
                     "max_ratio": float(r.max_ratio),
                     "actual_ratio": float(r.actual_ratio),
-                    "status": "above_range" if r.actual_ratio > r.max_ratio else "below_range"
+                    "status": "أعلى من القيمة العظمى" if r.actual_ratio > r.max_ratio else "اقل من القيمة الصغرى"
                 } for r in results
             ])
 
@@ -3001,7 +3002,7 @@ def show_reports(current_user):
                     "min_ratio": float(r.min_ratio),
                     "max_ratio": float(r.max_ratio),
                     "actual_ratio": float(r.actual_ratio),
-                    "status": "above_range" if r.actual_ratio > r.max_ratio else "below_range"
+                    "status": "أعلى من القيمة العظمى" if r.actual_ratio > r.max_ratio else "اقل من القيمة الصغرى"
                 } for r in results
             ])
 
@@ -3019,10 +3020,7 @@ def show_reports(current_user):
 
             query = query.filter(
                 (TechnologyBill.bill_year * 100 + TechnologyBill.bill_month).between(from_key, to_key),
-                or_(
-                    TechnologyBill.technology_water_amount == 0,
-                    TechnologyBill.technology_water_amount.is_(None)
-                ),
+                TechnologyBill.technology_water_amount == 0,
                 TechnologyBill.technology_power_consump.isnot(None),
                 TechnologyBill.technology_power_consump > 1200  # Threshold for abnormal power consumption
             )
@@ -3042,7 +3040,6 @@ def show_reports(current_user):
                     "month": r.bill_month,
                     "water_amount": float(r.technology_water_amount) if r.technology_water_amount else 0,
                     "power_consumption": float(r.technology_power_consump),
-                    "issue": "High power consumption with zero water production"
                 } for r in results
             ])
 
@@ -3531,67 +3528,166 @@ def balance_plot_calc(area_id, current_user):
 
             split_idx = int(len(df) * 0.8)
 
-            train_df = df.iloc[:split_idx]
-            test_df = df.iloc[split_idx:]
+            # train_df = df.iloc[:split_idx]
+            # test_df = df.iloc[split_idx:]
 
             # df["year_index"] = df["year"] - df["year"].min()
 
-            features = ["population", "month_sin", "month_cos"]
-            # Optional trend
-            if "year_index" in df.columns:
+            # features = ["population", "month_sin", "month_cos"]
+            # # Optional trend
+            # if "year_index" in df.columns:
+            #     features.append("year_index")
+            #
+            # X_train = train_df[features]
+            # y_train = train_df["total_water"]
+            #
+            # X_test = test_df[features]
+            # y_test = test_df["total_water"]
+            #
+            # model = LinearRegression()
+            # model.fit(X_train, y_train)
+            #
+            # y_pred = model.predict(X_test)
+            #
+            # print("R²:", r2_score(y_test, y_pred))
+            # print("MAE:", mean_absolute_error(y_test, y_pred))
+            #
+            # plt.figure()
+            # plt.plot(y_test.values, label="Actual")
+            # plt.plot(y_pred, label="Predicted")
+            # plt.legend()
+            # plt.title("Actual vs Predicted Water Production")
+            # plt.show()
+            # # This is GOLD
+            # coef_df = pd.DataFrame({
+            #     "feature": features,
+            #     "coefficient": model.coef_
+            # })
+            #
+            # print(coef_df)
+            #
+            # # 1️⃣ Seasonal peak month
+            # beta_2, beta_3 = model.coef_[features.index("month_sin")], model.coef_[features.index("month_cos")]
+            # month_angle = np.arctan2(beta_2, beta_3)
+            # peak_month = ((month_angle / (2 * np.pi)) * 12) % 12
+            # peak_month = int(np.round(peak_month)) + 1
+            # print(f"peak month: {peak_month}")
+            #
+            # # 2️⃣ Solve for population at max water
+            # target_water = total_stations_capacity  # or observed max
+            # beta_0 = model.intercept_
+            # beta_1 = model.coef_[features.index("population")]
+            # # beta_4 = model.coef_[features.index("year_index")]
+            #
+            # # Assume seasonal_peak = beta_2*sin + beta_3*cos
+            # seasonal_peak = beta_2 * np.sin(2 * np.pi * peak_month / 12) + beta_3 * np.cos(2 * np.pi * peak_month / 12)
+            #
+            # # Need year_index guess (start with 0)
+            # year_index_guess = 0  # will refine iteratively if needed
+            # pop_max = (target_water - (beta_0 + seasonal_peak)) / beta_1  #  + beta_4 * year_index_guess
+            #
+            # # 3️⃣ Convert population to year/month
+            # P0 = df["population"].iloc[-1]  # last known population
+            # monthly_rate = ((P0 / df["population"].iloc[-2]) ** (1 / 12)) - 1
+            # months_diff = np.log(pop_max / P0) / np.log(1 + monthly_rate)
+            #
+            # year = int(df["year"].iloc[-1] + months_diff // 12)
+            # month = int((months_diff % 12) + 1)
+            #
+            # print("Max production occurs at population:", int(pop_max))
+            # print("Predicted year/month:", year, month)
+            # Apply Log Transform
+            train_df = df.iloc[:split_idx].copy()
+            test_df = df.iloc[split_idx:].copy()
+            # Apply Log Transform
+            train_df["log_population"] = np.log(train_df["population"])
+            train_df["log_water"] = np.log(train_df["total_water"])
+
+            test_df["log_population"] = np.log(test_df["population"])
+            test_df["log_water"] = np.log(test_df["total_water"])
+
+            # --- 2. Define Features and Target ---
+            features = ["log_population", "month_sin", "month_cos"]
+
+            if "year_index" in train_df.columns:
                 features.append("year_index")
 
             X_train = train_df[features]
-            y_train = train_df["total_water"]
+            y_train = train_df["log_water"]  # Target is now Log(Water)
 
             X_test = test_df[features]
-            y_test = test_df["total_water"]
+            y_test_original = test_df["total_water"]
 
+            # --- 3. Train Model ---
             model = LinearRegression()
             model.fit(X_train, y_train)
 
-            y_pred = model.predict(X_test)
+            # --- 4. Calculate Smearing Factor (Bias Correction) ---
+            # Calculate residuals on the training set (Log scale)
+            train_predictions_log = model.predict(X_train)
+            residuals = y_train - train_predictions_log
+            smearing_factor = np.mean(np.exp(residuals))
 
-            print("R²:", r2_score(y_test, y_pred))
-            print("MAE:", mean_absolute_error(y_test, y_pred))
+            print(f"Smearing Factor (Bias Correction): {smearing_factor:.4f}")
+
+            # --- 5. Predict and Inverse Transform WITH Correction ---
+            y_pred_log = model.predict(X_test)
+            # Apply exp() AND multiply by the smearing factor
+            y_pred = np.exp(y_pred_log) * smearing_factor
+
+            # --- 6. Evaluate ---
+            print("R² (Original Scale):", r2_score(y_test_original, y_pred))
+            print("MAE (Original Scale):", mean_absolute_error(y_test_original, y_pred))
 
             plt.figure()
-            plt.plot(y_test.values, label="Actual")
-            plt.plot(y_pred, label="Predicted")
+            plt.plot(y_test_original.values, label="Actual")
+            plt.plot(y_pred, label="Predicted (Corrected)")
             plt.legend()
-            plt.title("Actual vs Predicted Water Production")
+            plt.title("Actual vs Predicted Water Production (Log-Log + Smearing)")
             plt.show()
-            # This is GOLD
+
+            # --- 7. Inspect Coefficients ---
             coef_df = pd.DataFrame({
                 "feature": features,
                 "coefficient": model.coef_
             })
-
             print(coef_df)
 
+            # --- 8. Analytical Calculations (WITH Smearing Correction) ---
+
             # 1️⃣ Seasonal peak month
-            beta_2, beta_3 = model.coef_[features.index("month_sin")], model.coef_[features.index("month_cos")]
+            beta_2 = model.coef_[features.index("month_sin")]
+            beta_3 = model.coef_[features.index("month_cos")]
             month_angle = np.arctan2(beta_2, beta_3)
             peak_month = ((month_angle / (2 * np.pi)) * 12) % 12
             peak_month = int(np.round(peak_month)) + 1
-            print(f"peak month: {peak_month}")
+            print(f"Peak month: {peak_month}")
 
             # 2️⃣ Solve for population at max water
-            target_water = total_stations_capacity  # or observed max
-            beta_0 = model.intercept_
-            beta_1 = model.coef_[features.index("population")]
-            # beta_4 = model.coef_[features.index("year_index")]
+            # The corrected equation is: Water = Smear * exp(B0 + B1*ln(Pop) + Seasonal)
+            # Taking ln of both sides: ln(Water) = ln(Smear) + B0 + B1*ln(Pop) + Seasonal
 
-            # Assume seasonal_peak = beta_2*sin + beta_3*cos
+            target_water = total_stations_capacity
+            beta_0 = model.intercept_
+            beta_1 = model.coef_[features.index("log_population")]
+
             seasonal_peak = beta_2 * np.sin(2 * np.pi * peak_month / 12) + beta_3 * np.cos(2 * np.pi * peak_month / 12)
 
-            # Need year_index guess (start with 0)
-            year_index_guess = 0  # will refine iteratively if needed
-            pop_max = (target_water - (beta_0 + seasonal_peak)) / beta_1  #  + beta_4 * year_index_guess
+            # Check for optional year_index
+            year_term = 0
+            if "year_index" in features:
+                beta_4 = model.coef_[features.index("year_index")]
+                year_index_guess = 0
+                year_term = beta_4 * year_index_guess
+
+            # Isolate ln(Population) including the ln(Smear) correction term
+            log_pop_max = (np.log(target_water) - np.log(smearing_factor) - beta_0 - seasonal_peak - year_term) / beta_1
+            pop_max = np.exp(log_pop_max)
 
             # 3️⃣ Convert population to year/month
-            P0 = df["population"].iloc[-1]  # last known population
+            P0 = df["population"].iloc[-1]  # Last known population
             monthly_rate = ((P0 / df["population"].iloc[-2]) ** (1 / 12)) - 1
+
             months_diff = np.log(pop_max / P0) / np.log(1 + monthly_rate)
 
             year = int(df["year"].iloc[-1] + months_diff // 12)
