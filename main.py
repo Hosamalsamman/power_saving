@@ -523,7 +523,7 @@ def home(current_user):
         current_month = 12
         current_year -= 1
     current_month_bills = db.session.query(TechnologyBill).filter(
-        TechnologyBill.bill_month == 9,
+        TechnologyBill.bill_month == 10,
         TechnologyBill.bill_year == 2025).all()
     over_power_consump = []
     over_chlorine_consump = []
@@ -1002,6 +1002,28 @@ def add_new_bill(account_number, current_user):
         print(data)
 
         gauge = db.session.get(Gauge, account_number)
+        last_bill = (
+            GuageBill.query
+            .filter_by(account_number=account_number)
+            .order_by(GuageBill.bill_year.desc(), GuageBill.bill_month.desc())
+            .first()
+        )
+        if last_bill:
+            last_month = last_bill.bill_month
+            last_year = last_bill.bill_year
+
+            new_month = data['bill_month']
+            new_year = data['bill_year']
+
+            if last_month == 12:
+                expected_month = 1
+                expected_year = last_year + 1
+            else:
+                expected_month = last_month + 1
+                expected_year = last_year
+
+            if new_month != expected_month or new_year != expected_year:
+                return {"error": f"برجاء إدخال فاتورة شهر {expected_month} لسنة {expected_year} أولاً"}, 400
         new_bill = GuageBill(
             account_number=account_number,
             bill_month=data['bill_month'],
@@ -1012,7 +1034,7 @@ def add_new_bill(account_number, current_user):
             power_consump=data['power_consump'],
             voltage_id=gauge.voltage_id,
             voltage_cost=gauge.voltage.voltage_cost,
-            consump_cost=data['power_consump'] * gauge.voltage.voltage_cost,
+            consump_cost=data['power_consump'] * gauge.voltage.voltage_cost + gauge.voltage.fixed_fee,
             fixed_installment=data['fixed_installment'],
             settlements=data['settlements'],
             settlement_qty=data['settlement_qty'],
@@ -1242,6 +1264,7 @@ def delete_bill(account_number, current_user):
     # --- skip audit for the automatic updates
     g.skip_audit = False
 
+    print(wrong_bill.to_dict())
     db.session.delete(wrong_bill)
     db.session.commit()
     return jsonify({"response": "تم حذف الفاتورة بنجاح"}), 200
@@ -3789,6 +3812,9 @@ def balance_plot_calc(area_id, current_user):
                 }
 
             rows = []
+
+            if not year_water_list:
+                return jsonify({"error": "لا يوجد مياه منتجة مسجلة لهذه المنطقة"}), 400
 
             for i in range(year_water_list[0]["financial_year"], data["goal_year"] + 1):
                 water_need = 0
