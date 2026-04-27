@@ -1,7 +1,6 @@
 import os
 from collections import defaultdict
 from decimal import Decimal
-
 import numpy as np
 from flask import Flask, abort, jsonify, render_template, request, make_response, current_app, g, has_request_context, session as flask_session
 from seaborn._marks.area import Area
@@ -476,7 +475,7 @@ def get_season(month):
 
 
 @app.route("/")
-@private_route([1, 2, 3, 4, 5, 6])
+@private_route([1, 2, 3, 4, 5, 6, 7])
 def home(current_user):
     current_year = datetime.now().year
     totals_per_type = (
@@ -502,7 +501,7 @@ def home(current_user):
 
         )
         .join(TechnologyBill.station)
-        .filter(TechnologyBill.bill_year == current_year)
+        .filter(TechnologyBill.bill_year == 2025)
         .filter(TechnologyBill.technology_bill_percentage.isnot(None))
         .one()
     )
@@ -523,7 +522,7 @@ def home(current_user):
         current_month = 12
         current_year -= 1
     current_month_bills = db.session.query(TechnologyBill).filter(
-        TechnologyBill.bill_month == 10,
+        TechnologyBill.bill_month == 12,
         TechnologyBill.bill_year == 2025).all()
     over_power_consump = []
     over_chlorine_consump = []
@@ -605,7 +604,7 @@ def home(current_user):
 
 
 @app.route("/stations")
-@private_route([1, 2, 3, 6])
+@private_route([1, 2, 3, 6, 7])
 def stations(current_user):
     # print(current_user.emp_code) pass current_user as input to func to access the object
     all_stations = db.session.query(Station).all()
@@ -706,7 +705,7 @@ def add_new_station(current_user):
 
 
 @app.route("/technologies")
-@private_route([1, 2, 3, 6])
+@private_route([1, 2, 3, 6, 7])
 def technologies(current_user):
     all_techs = db.session.query(Technology).all()
     techs_list = [tech.to_dict() for tech in all_techs]
@@ -890,7 +889,7 @@ def add_new_gauge(current_user):
 
 
 @app.route("/stg-relations")
-@private_route([1, 3])
+@private_route([1, 3, 7])
 def stg_relations(current_user):
     all_stgs = db.session.query(StationGaugeTechnology).all()
     stgs_list = [stg.to_dict() for stg in all_stgs]
@@ -1002,28 +1001,28 @@ def add_new_bill(account_number, current_user):
         print(data)
 
         gauge = db.session.get(Gauge, account_number)
-        last_bill = (
-            GuageBill.query
-            .filter_by(account_number=account_number)
-            .order_by(GuageBill.bill_year.desc(), GuageBill.bill_month.desc())
-            .first()
-        )
-        if last_bill:
-            last_month = last_bill.bill_month
-            last_year = last_bill.bill_year
-
-            new_month = data['bill_month']
-            new_year = data['bill_year']
-
-            if last_month == 12:
-                expected_month = 1
-                expected_year = last_year + 1
-            else:
-                expected_month = last_month + 1
-                expected_year = last_year
-
-            if new_month != expected_month or new_year != expected_year:
-                return {"error": f"برجاء إدخال فاتورة شهر {expected_month} لسنة {expected_year} أولاً"}, 400
+        # last_bill = (
+        #     GuageBill.query
+        #     .filter_by(account_number=account_number)
+        #     .order_by(GuageBill.bill_year.desc(), GuageBill.bill_month.desc())
+        #     .first()
+        # )
+        # if last_bill:
+        #     last_month = last_bill.bill_month
+        #     last_year = last_bill.bill_year
+        #
+        #     new_month = data['bill_month']
+        #     new_year = data['bill_year']
+        #
+        #     if last_month == 12:
+        #         expected_month = 1
+        #         expected_year = last_year + 1
+        #     else:
+        #         expected_month = last_month + 1
+        #         expected_year = last_year
+        #
+        #     if new_month != expected_month or new_year != expected_year:
+        #         return {"error": f"برجاء إدخال فاتورة شهر {expected_month} لسنة {expected_year} أولاً"}, 400
         new_bill = GuageBill(
             account_number=account_number,
             bill_month=data['bill_month'],
@@ -1145,8 +1144,13 @@ def add_new_bill(account_number, current_user):
                     TechnologyBill.bill_month == new_bill.bill_month,
                     TechnologyBill.bill_year == new_bill.bill_year).first()
                 if current_tech_bill:
-                    current_tech_bill.technology_power_consump += new_bill.power_consump
-                    current_tech_bill.technology_bill_total += new_bill.bill_total
+                    # current_tech_bill.technology_bill_percentage = 100
+                    if current_tech_bill.technology_power_consump != None:
+                        current_tech_bill.technology_power_consump += new_bill.power_consump
+                        current_tech_bill.technology_bill_total += new_bill.bill_total
+                    else:
+                        current_tech_bill.technology_power_consump = new_bill.power_consump
+                        current_tech_bill.technology_bill_total = new_bill.bill_total
                 else:
                     tech_bill = TechnologyBill(
                         station_id=gauge_sgts[0].station_id,
@@ -1169,11 +1173,20 @@ def add_new_bill(account_number, current_user):
                         TechnologyBill.bill_year == new_bill.bill_year).first()
                     if current_tech_bill:
                         if not current_tech_bill.technology_bill_percentage:
-                            current_tech_bill.technology_power_consump += new_bill.power_consump  #add it any way and divide it according to water amount
-                            current_tech_bill.technology_bill_total += new_bill.bill_total  #add it any way and divide it according to water amount
+                            if current_tech_bill.technology_power_consump != None:
+                                current_tech_bill.technology_power_consump += new_bill.power_consump  #add it any way and divide it according to water amount
+                                current_tech_bill.technology_bill_total += new_bill.bill_total  #add it any way and divide it according to water amount
+                            else:
+                                current_tech_bill.technology_power_consump = new_bill.power_consump  # add it any way and divide it according to water amount
+                                current_tech_bill.technology_bill_total = new_bill.bill_total  # add it any way and divide it according to water amount
                         else:
-                            current_tech_bill.technology_power_consump += new_bill.power_consump * current_tech_bill.technology_bill_percentage / 100
-                            current_tech_bill.technology_bill_total += Decimal(float(new_bill.bill_total) * current_tech_bill.technology_bill_percentage / 100)
+                            if current_tech_bill.technology_power_consump != None:
+                                current_tech_bill.technology_power_consump += new_bill.power_consump * current_tech_bill.technology_bill_percentage / 100
+                                current_tech_bill.technology_bill_total += Decimal(float(new_bill.bill_total) * current_tech_bill.technology_bill_percentage / 100)
+                            else:
+                                current_tech_bill.technology_power_consump = new_bill.power_consump * current_tech_bill.technology_bill_percentage / 100
+                                current_tech_bill.technology_bill_total = Decimal(
+                                    float(new_bill.bill_total) * current_tech_bill.technology_bill_percentage / 100)
                     else:
                         tech_bill = TechnologyBill(
                             station_id=gauge_sgts[i].station_id,
@@ -1271,7 +1284,7 @@ def delete_bill(account_number, current_user):
 
 
 @app.route("/tech-bills")
-@private_route([1, 2])
+@private_route([1, 2, 7])
 def show_null_tech_bills(current_user):
     # Comprehensive check for various "empty" values
     all_tech_bills = db.session.query(TechnologyBill).filter(
@@ -1410,8 +1423,180 @@ def edit_tech_bill(tech_bill_id, current_user):
     return jsonify(bill.to_dict())
 
 
+@app.route("/insert-or-edit-tech-bill", methods=["GET", "POST"])
+@private_route([1, 2])
+def insert_or_edit_tech_bill(current_user):
+    branches = db.session.query(Branch).all()
+    branches_list = [branch.to_dict() for branch in branches]
+    stations = db.session.query(Station).all()
+    stations_list = []
+    for i in range(len(stations)):
+        stations_list.append(stations[i].to_dict())
+        stations_list[i]['techs'] = []
+        for station_tech in stations[i].station_techs:
+            if station_tech.technology.to_dict() not in stations_list[i]['techs']:
+                stations_list[i]['techs'].append(station_tech.technology.to_dict())
+
+    if request.method == "POST":
+        data = request.get_json()
+        print(data)
+        bill = db.session.query(TechnologyBill).filter(
+            TechnologyBill.bill_year == data["bill_year"],
+            TechnologyBill.bill_month == data["bill_month"],
+            TechnologyBill.station_id == data["station_id"],
+            TechnologyBill.technology_id == data["technology_id"],
+        ).first()
+
+        if bill:
+            # if data['technology_water_amount'] == 0:
+            #     return jsonify({"error": "يجب أن تكون كمية المياه المنتجة اكبر من صفر"})
+            # if data['technology_chlorine_consump'] == 0:
+            #     return jsonify({"error": "يجب أن تكون كمية الكلور المستهلكة اكبر من صفر"})
+            bill.technology_liquid_alum_consump = data['technology_liquid_alum_consump'] * 1000
+            bill.technology_solid_alum_consump = data['technology_solid_alum_consump'] * 1000
+            bill.technology_chlorine_consump = data['technology_chlorine_consump'] * 1000
+            bill.technology_water_amount = data['technology_water_amount']
+        else:
+            print("else")
+            bill = TechnologyBill(
+                bill_year=data["bill_year"],
+                bill_month=data["bill_month"],
+                station_id=data["station_id"],
+                technology_id=data["technology_id"],
+                technology_liquid_alum_consump=data["technology_liquid_alum_consump"] * 1000,
+                technology_solid_alum_consump=data["technology_solid_alum_consump"] * 1000,
+                technology_chlorine_consump=data["technology_chlorine_consump"] * 1000,
+                technology_water_amount=data["technology_water_amount"],
+            )
+            sgt = db.session.query(StationGaugeTechnology).filter(
+                StationGaugeTechnology.station_id == bill.station_id,
+                StationGaugeTechnology.technology_id == bill.technology_id).first()
+            # print(sgt.to_dict())
+            gauge_sgts = db.session.query(StationGaugeTechnology).filter(
+                StationGaugeTechnology.account_number == sgt.account_number,
+                StationGaugeTechnology.relation_status == True).all()
+            if len(gauge_sgts) == 1:
+                bill.technology_bill_percentage = 100
+            db.session.add(bill)
+
+
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            print(e)
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            print(e)
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+
+        g.skip_audit = True
+        bill.power_per_water = bill.technology.power_per_water
+        g.skip_audit = False
+
+        current_season = get_season(bill.bill_month)
+        current_water_source = bill.station.water_source_id
+        chemicals_ref = db.session.query(AlumChlorineReference).filter(
+            AlumChlorineReference.technology_id == bill.technology_id,
+            AlumChlorineReference.season == current_season,
+            AlumChlorineReference.water_source_id == current_water_source).first()
+        if chemicals_ref:
+            bill.chlorine_range_from = chemicals_ref.chlorine_range_from
+            bill.chlorine_range_to = chemicals_ref.chlorine_range_to
+            bill.liquid_alum_range_from = chemicals_ref.liquid_alum_range_from
+            bill.liquid_alum_range_to = chemicals_ref.liquid_alum_range_to
+            bill.solid_alum_range_from = chemicals_ref.solid_alum_range_from
+            bill.solid_alum_range_to = chemicals_ref.solid_alum_range_to
+
+        if not bill.technology_bill_percentage:
+            # get related tech bills of related gauge
+            sgt = db.session.query(StationGaugeTechnology).filter(
+                StationGaugeTechnology.station_id == bill.station_id,
+                StationGaugeTechnology.technology_id == bill.technology_id).first()
+            print(sgt.to_dict())
+            gauge_sgts = db.session.query(StationGaugeTechnology).filter(
+                StationGaugeTechnology.account_number == sgt.account_number,
+                StationGaugeTechnology.relation_status == True).all()
+            print(gauge_sgts)
+            related_bills = []
+            for gauge_sgt in gauge_sgts:
+                related_bill = db.session.query(TechnologyBill).filter(
+                    TechnologyBill.station_id == gauge_sgt.station_id,
+                    TechnologyBill.technology_id == gauge_sgt.technology_id,
+                    TechnologyBill.bill_month == bill.bill_month,
+                    TechnologyBill.bill_year == bill.bill_year
+                ).first()
+                if related_bill:
+                    related_bills.append(related_bill)
+            print(related_bills)
+            # check if all bills have water amount values
+            # calculate total amount
+            total_water_amount = 0
+            if len(gauge_sgts) == len(related_bills):
+                should_calculate = True
+                for this_bill in related_bills:
+                    if this_bill.technology_water_amount != None:
+                        total_water_amount += this_bill.technology_water_amount
+                    else:
+                        should_calculate = False
+            else:
+                should_calculate = False
+
+            # calculate percent for each tech bill
+            # apply for power and bill
+            if should_calculate:
+                for each_bill in related_bills:
+                    if total_water_amount == 0:
+                        each_bill.technology_bill_percentage = 100 / len(related_bills)
+                    else:
+                        each_bill.technology_bill_percentage = each_bill.technology_water_amount / total_water_amount * 100
+                    if each_bill.technology_power_consump != None:
+                        each_bill.technology_power_consump = each_bill.technology_bill_percentage * each_bill.technology_power_consump
+                        each_bill.technology_bill_total = Decimal(str(each_bill.technology_bill_percentage)) * each_bill.technology_bill_total
+
+        # --- skip audit for the automatic updates
+        g.skip_audit = True
+
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify(
+                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
+        except DataError as e:
+            db.session.rollback()
+            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            print(e)
+            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+        else:
+            response = {
+                "response": {
+                    "success": "تم ادخال البيانات بنجاح"
+                }
+            }
+            return jsonify(response), 200
+        finally:
+            # ✅ Always re-enable auditing for future commits
+            g.skip_audit = False
+
+    return jsonify(branches=branches_list, stations=stations_list)
+
+
 @app.route("/view-tech-bills", methods=["GET"])
-@private_route([1, 2, 3, 6])
+@private_route([1, 2, 3, 6, 7])
 def view_tech_bills(current_user):
     tech_bills = db.session.query(TechnologyBill).filter(TechnologyBill.technology_bill_percentage.isnot(None)).all()
     t_b_list = [bill.to_dict() for bill in tech_bills]
@@ -1569,7 +1754,7 @@ def edit_voltage_cost(voltage_id, current_user):
 
 
 @app.route("/chemicals")
-@private_route([1, 4, 6])
+@private_route([1, 4, 6, 7])
 def chemicals(current_user):
     chemicals = db.session.query(AlumChlorineReference).all()
     userschemicals_list = [chemical.to_dict() for chemical in chemicals]
@@ -2366,7 +2551,7 @@ def new_annual_bill(meter_id, current_user):
 
 
 @app.route("/prediction/<station_id>", methods=["GET", "POST"])
-@private_route([1, 2, 6])
+@private_route([1, 2, 6, 7])
 def predict(station_id, current_user):
     if request.method == "POST":
         station_bills = db.session.query(TechnologyBill).filter(
@@ -2464,7 +2649,7 @@ def predict(station_id, current_user):
 
 
 @app.route("/reports", methods=["GET", "POST"])
-@private_route([1, 2, 3, 4, 6])
+@private_route([1, 2, 3, 4, 6, 7])
 def show_reports(current_user):
     if request.method == "POST":
         data = request.get_json()
@@ -4004,7 +4189,7 @@ def balance_plot_calc(area_id, current_user):
 def register():
     if request.method == "POST":
         data = request.get_json()
-        print(data)
+        # print(data)
         user = db.session.query(User).filter(User.username == data['username']).first()
         if user:
             return jsonify({"error": "يوجد حساب بهذا الاسم، جرب تسجيل الدخول بدلا من إنشاء حساب جديد"}), 401
@@ -4115,7 +4300,7 @@ def login():
 
 
 @app.route("/change-password", methods=["GET", "POST"])
-@private_route([1, 2, 3, 4])
+@private_route([1, 2, 3, 4, 5, 6, 7])
 def change_password(current_user):
     if request.method == "POST":
         data = request.get_json()
