@@ -478,31 +478,134 @@ def get_season(month):
 @private_route([1, 2, 3, 4, 5, 6, 7])
 def home(current_user):
     current_year = datetime.now().year
+    valid_percent = TechnologyBill.technology_bill_percentage.isnot(None)
+    today = datetime.now()
+
+    if today.month >= 7:
+        fy_start_year = today.year
+        fy_end_year = today.year + 1
+    else:
+        fy_start_year = today.year - 1
+        fy_end_year = today.year
+
     totals_per_type = (
         db.session.query(
-            func.sum(TechnologyBill.technology_power_consump).label("power"),
-            func.sum(TechnologyBill.technology_bill_total).label("money"),
-            func.sum(TechnologyBill.technology_chlorine_consump).label("chlorine"),
-            func.sum(TechnologyBill.technology_solid_alum_consump).label("solid_alum"),
-            func.sum(TechnologyBill.technology_liquid_alum_consump).label("liquid_alum"),
-            func.sum(
-                case(
-                    (Station.station_type == "مياة", TechnologyBill.technology_water_amount),
-                    else_=0
-                )
+            # 🔹 Power
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                TechnologyBill.technology_power_consump.isnot(None),
+                                valid_percent
+                            ),
+                            TechnologyBill.technology_power_consump
+                        ),
+                        else_=None
+                    )
+                ), 0
+            ).label("power"),
+
+            # 🔹 Bill total
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                TechnologyBill.technology_bill_total.isnot(None),
+                                valid_percent
+                            ),
+                            TechnologyBill.technology_bill_total
+                        ),
+                        else_=None
+                    )
+                ), 0
+            ).label("money"),
+
+            # 🔹 Chlorine
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            TechnologyBill.technology_chlorine_consump.isnot(None),
+                            TechnologyBill.technology_chlorine_consump
+                        ),
+                        else_=None
+                    )
+                ), 0
+            ).label("chlorine"),
+
+            # 🔹 Solid alum
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            TechnologyBill.technology_solid_alum_consump.isnot(None),
+                            TechnologyBill.technology_solid_alum_consump
+                        ),
+                        else_=None
+                    )
+                ), 0
+            ).label("solid_alum"),
+
+            # 🔹 Liquid alum
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            TechnologyBill.technology_liquid_alum_consump.isnot(None),
+                            TechnologyBill.technology_liquid_alum_consump
+                        ),
+                        else_=None
+                    )
+                ), 0
+            ).label("liquid_alum"),
+
+            # 🔹 Water (مياة)
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                Station.station_type == "مياة",
+                                TechnologyBill.technology_water_amount.isnot(None)
+                            ),
+                            TechnologyBill.technology_water_amount
+                        ),
+                        else_=None
+                    )
+                ), 0
             ).label("water"),
 
-            func.sum(
-                case(
-                    (Station.station_type == "صرف", TechnologyBill.technology_water_amount),
-                    else_=0
-                )
+            # 🔹 Sanitation (صرف)
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                Station.station_type == "صرف",
+                                TechnologyBill.technology_water_amount.isnot(None)
+                            ),
+                            TechnologyBill.technology_water_amount
+                        ),
+                        else_=None
+                    )
+                ), 0
             ).label("sanitation"),
-
         )
         .join(TechnologyBill.station)
-        .filter(TechnologyBill.bill_year == 2025)
-        .filter(TechnologyBill.technology_bill_percentage.isnot(None))
+        .filter(
+            or_(
+                and_(
+                    TechnologyBill.bill_year == fy_start_year,
+                    TechnologyBill.bill_month >= 7
+                ),
+                and_(
+                    TechnologyBill.bill_year == fy_end_year,
+                    TechnologyBill.bill_month <= 6
+                )
+            )
+        )
         .one()
     )
 
@@ -529,11 +632,14 @@ def home(current_user):
     over_solid_alum_consump = []
     over_liquid_alum_consump = []
     over_power_for_0_water = []
+    water_with_missing_power = []
     for bill in current_month_bills:
         if bill.power_per_water:
-            if bill.technology_water_amount and bill.technology_bill_percentage and (
+            if bill.technology_water_amount and bill.technology_bill_percentage and bill.technology_power_consump and (
                     bill.technology_power_consump / bill.technology_water_amount > bill.power_per_water):
                 over_power_consump.append(bill.to_dict())
+            elif bill.technology_water_amount and bill.technology_bill_percentage and (bill.technology_power_consump == None):
+                water_with_missing_power.append(bill.to_dict())
             if bill.technology_water_amount and bill.chlorine_range_to and (
                     (bill.technology_chlorine_consump / bill.technology_water_amount) > bill.chlorine_range_to or (
                     bill.technology_chlorine_consump / bill.technology_water_amount) < bill.chlorine_range_from):
@@ -546,7 +652,7 @@ def home(current_user):
                                                       bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
                                                       bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from):
                 over_liquid_alum_consump.append(bill.to_dict())
-            elif bill.technology_water_amount == 0 and bill.technology_power_consump > 1200:
+            elif (bill.technology_water_amount == None or bill.technology_water_amount == 0) and bill.technology_power_consump > 1200:
                 over_power_for_0_water.append(bill.to_dict())
     # query with group by station to compare with water capacity
     query = (
@@ -978,8 +1084,8 @@ def cancel_relation(relation_id, current_user):
 
 
 @app.route("/new-bill/<path:account_number>", methods=["GET", "POST"])
-@private_route([1, 3])
-def add_new_bill(account_number, current_user):
+# @private_route([1, 3])
+def add_new_bill(account_number):
     print(account_number)
     # show_percent = False
     gauge_sgts = db.session.query(StationGaugeTechnology).filter(
@@ -1118,6 +1224,7 @@ def add_new_bill(account_number, current_user):
             return jsonify(
                 {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة", "details": str(e)}), 400
         except DataError as e:
+            print(e)
             db.session.rollback()
             return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
         except SQLAlchemyError as e:
@@ -1134,94 +1241,167 @@ def add_new_bill(account_number, current_user):
             # --- skip audit for the automatic updates
             g.skip_audit = True
 
-            #  search station gauge technology relation then insert in technology bill the corresponding data
-            # one to one relations or many to one relations
-            if len(gauge_sgts) == 1:
-                # check if a single or multi gauges are providing for same tech
-                current_tech_bill = db.session.query(TechnologyBill).filter(
-                    TechnologyBill.station_id == gauge_sgts[0].station_id,
-                    TechnologyBill.technology_id == gauge_sgts[0].technology_id,
-                    TechnologyBill.bill_month == new_bill.bill_month,
-                    TechnologyBill.bill_year == new_bill.bill_year).first()
-                if current_tech_bill:
-                    # current_tech_bill.technology_bill_percentage = 100
-                    if current_tech_bill.technology_power_consump != None:
-                        current_tech_bill.technology_power_consump += new_bill.power_consump
-                        current_tech_bill.technology_bill_total += new_bill.bill_total
+            if gauge_sgts[0].is_source:
+                related_bills = []
+                for g_sgt in gauge_sgts:
+                    bill = TechnologyBill.query.filter(
+                        TechnologyBill.station_id == g_sgt.station_id,
+                        TechnologyBill.technology_id == g_sgt.technology_id,
+                        TechnologyBill.bill_month == new_bill.bill_month,
+                        TechnologyBill.bill_year == new_bill.bill_year
+                    ).first()
+                    if bill:
+                        related_bills.append(bill)
                     else:
-                        current_tech_bill.technology_power_consump = new_bill.power_consump
-                        current_tech_bill.technology_bill_total = new_bill.bill_total
-                else:
-                    tech_bill = TechnologyBill(
-                        station_id=gauge_sgts[0].station_id,
-                        technology_id=gauge_sgts[0].technology_id,
-                        bill_month=new_bill.bill_month,
-                        bill_year=new_bill.bill_year,
-                        technology_power_consump=new_bill.power_consump,
-                        technology_bill_total=new_bill.bill_total,
-                        technology_bill_percentage=100
-                    )
-                    db.session.add(tech_bill)
-            # one to many and many to many relations
+                        break
+                if len(gauge_sgts) == len(related_bills):
+                    should_calculate = True
+                    total_water = 0
+                    for related_bill in related_bills:
+                        if related_bill.technology_water_amount == None or related_bill.technology_bill_percentage == None:
+                            should_calculate = False
+                            break
+                        else:
+                            total_water += related_bill.technology_water_amount
+                    if should_calculate:
+                        for r_b in related_bills:
+                            if total_water:
+                                if r_b.technology_power_consump == None:
+                                    r_b.technology_power_consump = new_bill.power_consump * r_b.technology_water_amount / total_water
+                                    r_b.technology_bill_total = new_bill.bill_total * Decimal(r_b.technology_water_amount / total_water)
+                                else:
+                                    r_b.technology_power_consump += new_bill.power_consump * r_b.technology_water_amount / total_water
+                                    r_b.technology_bill_total += new_bill.bill_total * Decimal(r_b.technology_water_amount / total_water)
+                            else:
+                                if r_b.technology_power_consump == None:
+                                    r_b.technology_power_consump = new_bill.power_consump / len(gauge_sgts)
+                                    r_b.technology_bill_total = new_bill.bill_total / Decimal(len(gauge_sgts))
+                                else:
+                                    r_b.technology_power_consump += new_bill.power_consump / len(gauge_sgts)
+                                    r_b.technology_bill_total += new_bill.bill_total / Decimal(len(gauge_sgts))
+                        try:
+                            db.session.commit()
+                        except IntegrityError as e:
+                            print(e)
+                            db.session.rollback()
+                            return jsonify(
+                                {"error": "خطأ في تكامل البيانات: قد تكون البيانات مكررة أو غير صالحة",
+                                 "details": str(e)}), 400
+                        except DataError as e:
+                            print(e)
+                            db.session.rollback()
+                            return jsonify({"error": "خطأ في نوع البيانات أو الحجم", "details": str(e)}), 404
+                        except SQLAlchemyError as e:
+                            print(e)
+                            db.session.rollback()
+                            return jsonify({"error": "خطأ في قاعدة البيانات", "details": str(e)}), 500
+                        except Exception as e:
+                            print(e)
+                            db.session.rollback()
+                            return jsonify({"error": "حدث خطأ غير متوقع", "details": str(e)}), 503
+                        else:
+                            for r_b in related_bills:
+                                print(r_b.to_dict())
+                            response = {
+                                "response": {
+                                    "success": "تم اضافة الفاتورة بنجاح"
+                                }
+                            }
+                            return jsonify(response), 200
+                        finally:
+                            g.skip_audit = False
+
+                g.skip_audit = False
+                return jsonify({"success": True}), 200
             else:
-                for i in range(len(gauge_sgts)):
+                #  search station gauge technology relation then insert in technology bill the corresponding data
+                # one to one relations or many to one relations
+                if len(gauge_sgts) == 1:
                     # check if a single or multi gauges are providing for same tech
                     current_tech_bill = db.session.query(TechnologyBill).filter(
-                        TechnologyBill.station_id == gauge_sgts[i].station_id,
-                        TechnologyBill.technology_id == gauge_sgts[i].technology_id,
+                        TechnologyBill.station_id == gauge_sgts[0].station_id,
+                        TechnologyBill.technology_id == gauge_sgts[0].technology_id,
                         TechnologyBill.bill_month == new_bill.bill_month,
                         TechnologyBill.bill_year == new_bill.bill_year).first()
                     if current_tech_bill:
-                        if not current_tech_bill.technology_bill_percentage:
-                            if current_tech_bill.technology_power_consump != None:
-                                current_tech_bill.technology_power_consump += new_bill.power_consump  #add it any way and divide it according to water amount
-                                current_tech_bill.technology_bill_total += new_bill.bill_total  #add it any way and divide it according to water amount
-                            else:
-                                current_tech_bill.technology_power_consump = new_bill.power_consump  # add it any way and divide it according to water amount
-                                current_tech_bill.technology_bill_total = new_bill.bill_total  # add it any way and divide it according to water amount
+                        # current_tech_bill.technology_bill_percentage = 100
+                        if current_tech_bill.technology_power_consump != None:
+                            current_tech_bill.technology_power_consump += new_bill.power_consump
+                            current_tech_bill.technology_bill_total += new_bill.bill_total
                         else:
-                            if current_tech_bill.technology_power_consump != None:
-                                current_tech_bill.technology_power_consump += new_bill.power_consump * current_tech_bill.technology_bill_percentage / 100
-                                current_tech_bill.technology_bill_total += Decimal(float(new_bill.bill_total) * current_tech_bill.technology_bill_percentage / 100)
-                            else:
-                                current_tech_bill.technology_power_consump = new_bill.power_consump * current_tech_bill.technology_bill_percentage / 100
-                                current_tech_bill.technology_bill_total = Decimal(
-                                    float(new_bill.bill_total) * current_tech_bill.technology_bill_percentage / 100)
+                            current_tech_bill.technology_power_consump = new_bill.power_consump
+                            current_tech_bill.technology_bill_total = new_bill.bill_total
                     else:
                         tech_bill = TechnologyBill(
-                            station_id=gauge_sgts[i].station_id,
-                            technology_id=gauge_sgts[i].technology_id,
+                            station_id=gauge_sgts[0].station_id,
+                            technology_id=gauge_sgts[0].technology_id,
                             bill_month=new_bill.bill_month,
                             bill_year=new_bill.bill_year,
-                            technology_power_consump=new_bill.power_consump,    #add it any way and divide it according to water amount
-                            technology_bill_total=new_bill.bill_total           #add it any way and divide it according to water amount
+                            technology_power_consump=new_bill.power_consump,
+                            technology_bill_total=new_bill.bill_total,
+                            technology_bill_percentage=100
                         )
                         db.session.add(tech_bill)
-            db.session.commit()
+                # one to many and many to many relations
+                else:
+                    for i in range(len(gauge_sgts)):
+                        # check if a single or multi gauges are providing for same tech
+                        current_tech_bill = db.session.query(TechnologyBill).filter(
+                            TechnologyBill.station_id == gauge_sgts[i].station_id,
+                            TechnologyBill.technology_id == gauge_sgts[i].technology_id,
+                            TechnologyBill.bill_month == new_bill.bill_month,
+                            TechnologyBill.bill_year == new_bill.bill_year).first()
+                        if current_tech_bill:
+                            if not current_tech_bill.technology_bill_percentage:
+                                if current_tech_bill.technology_power_consump != None:
+                                    current_tech_bill.technology_power_consump += new_bill.power_consump  #add it any way and divide it according to water amount
+                                    current_tech_bill.technology_bill_total += new_bill.bill_total  #add it any way and divide it according to water amount
+                                else:
+                                    current_tech_bill.technology_power_consump = new_bill.power_consump  # add it any way and divide it according to water amount
+                                    current_tech_bill.technology_bill_total = new_bill.bill_total  # add it any way and divide it according to water amount
+                            else:
+                                if current_tech_bill.technology_power_consump != None:
+                                    current_tech_bill.technology_power_consump += new_bill.power_consump * current_tech_bill.technology_bill_percentage / 100
+                                    current_tech_bill.technology_bill_total += new_bill.bill_total * Decimal(current_tech_bill.technology_bill_percentage / 100)
+                                else:
+                                    current_tech_bill.technology_power_consump = new_bill.power_consump * current_tech_bill.technology_bill_percentage / 100
+                                    current_tech_bill.technology_bill_total = new_bill.bill_total * Decimal(current_tech_bill.technology_bill_percentage / 100)
+                        else:
+                            tech_bill = TechnologyBill(
+                                station_id=gauge_sgts[i].station_id,
+                                technology_id=gauge_sgts[i].technology_id,
+                                bill_month=new_bill.bill_month,
+                                bill_year=new_bill.bill_year,
+                                technology_power_consump=new_bill.power_consump,    #add it any way and divide it according to water amount
+                                technology_bill_total=new_bill.bill_total           #add it any way and divide it according to water amount
+                            )
+                            db.session.add(tech_bill)
+                db.session.commit()
 
-            # --- # ensure it’s turned back off
-            g.skip_audit = False
+                # --- # ensure it’s turned back off
+                g.skip_audit = False
 
-            response = {
-                "response": {
-                    "success": "تم إضافة الفاتورة بنجاح"
+                response = {
+                    "response": {
+                        "success": "تم إضافة الفاتورة بنجاح"
+                    }
                 }
-            }
-            # import requests
-            # FCM_SERVER_KEY = "YOUR_FCM_KEY"
-            #
-            # def send_push(token, title, body):
-            #     headers = {
-            #         'Authorization': 'key=' + FCM_SERVER_KEY,
-            #         'Content-Type': 'application/json'
-            #     }
-            #     payload = {
-            #         'to': token,
-            #         'notification': {'title': title, 'body': body}
-            #     }
-            #     requests.post('https://fcm.googleapis.com/fcm/send', headers=headers, json=payload)
-            return jsonify(response), 200
+                # import requests
+                # FCM_SERVER_KEY = "YOUR_FCM_KEY"
+                #
+                # def send_push(token, title, body):
+                #     headers = {
+                #         'Authorization': 'key=' + FCM_SERVER_KEY,
+                #         'Content-Type': 'application/json'
+                #     }
+                #     payload = {
+                #         'to': token,
+                #         'notification': {'title': title, 'body': body}
+                #     }
+                #     requests.post('https://fcm.googleapis.com/fcm/send', headers=headers, json=payload)
+                return jsonify(response), 200
     return jsonify(gauge_sgt_list=gauge_sgt_list)  #, show_percent=show_percent
+
 
 
 @app.route("/view-bills", methods=["GET"])
@@ -1242,10 +1422,17 @@ def delete_bill(account_number, current_user):
         .order_by(GuageBill.bill_year.desc(), GuageBill.bill_month.desc())
         .first()
     )
+    source_stg = StationGaugeTechnology.query.filter(
+        StationGaugeTechnology.account_number == account_number,
+        StationGaugeTechnology.is_source == True
+    ).first()
+    if source_stg:
+        return jsonify({"error": "عداد مأخذ، لم يتم الحذف"}), 404
     gauge_sgts = db.session.query(StationGaugeTechnology).filter(
         and_(
             StationGaugeTechnology.account_number == account_number,
-            StationGaugeTechnology.relation_status == True
+            StationGaugeTechnology.relation_status == True,
+            StationGaugeTechnology.is_source == False
         )
     ).all()
     tech_bills_related = []
@@ -1354,11 +1541,14 @@ def edit_tech_bill(tech_bill_id, current_user):
             # get related tech bills of related gauge
             sgt = db.session.query(StationGaugeTechnology).filter(
                 StationGaugeTechnology.station_id == bill.station_id,
-                StationGaugeTechnology.technology_id == bill.technology_id).first()
+                StationGaugeTechnology.technology_id == bill.technology_id,
+                StationGaugeTechnology.relation_status == True,
+                StationGaugeTechnology.is_source == False).first()
             print(sgt.to_dict())
             gauge_sgts = db.session.query(StationGaugeTechnology).filter(
                 StationGaugeTechnology.account_number == sgt.account_number,
-                StationGaugeTechnology.relation_status == True).all()
+                StationGaugeTechnology.relation_status == True,
+                StationGaugeTechnology.is_source == False).all()
             print(gauge_sgts)
             related_bills = []
             for gauge_sgt in gauge_sgts:
@@ -1390,6 +1580,71 @@ def edit_tech_bill(tech_bill_id, current_user):
                         each_bill.technology_bill_percentage = each_bill.technology_water_amount / total_water_amount * 100
                     each_bill.technology_power_consump = each_bill.technology_bill_percentage * each_bill.technology_power_consump
                     each_bill.technology_bill_total = Decimal(str(each_bill.technology_bill_percentage)) * each_bill.technology_bill_total
+
+        #TODO: add rource power if exists
+        should_calc_source = True
+        source_stg = StationGaugeTechnology.query.filter(
+            StationGaugeTechnology.station_id == bill.station_id,
+            StationGaugeTechnology.technology_id == bill.technology_id,
+            StationGaugeTechnology.relation_status == True,
+            StationGaugeTechnology.is_source == True
+        ).first()
+        if not source_stg:
+            should_calc_source = False
+        else:
+            current_gauge_bill = GuageBill.query.filter(
+                GuageBill.account_number == source_stg.account_number,
+                GuageBill.bill_month == bill.bill_month,
+                GuageBill.bill_year == bill.bill_year
+            ).first()
+            if not current_gauge_bill:
+                should_calc_source = False
+            else:
+                source_gauge_stg = StationGaugeTechnology.query.filter(
+                    StationGaugeTechnology.account_number == current_gauge_bill.account_number,
+                    StationGaugeTechnology.relation_status == True,
+                    StationGaugeTechnology.is_source == True
+                ).all()
+                source_related_bills = []
+                total_water_for_resource = 0
+                for each_rel in source_gauge_stg:
+                    s_b = TechnologyBill.query.filter(
+                        TechnologyBill.station_id == each_rel.station_id,
+                        TechnologyBill.technology_id == each_rel.technology_id,
+                        TechnologyBill.bill_month == bill.bill_month,
+                        TechnologyBill.bill_year == bill.bill_year
+                    ).first()
+                    if s_b:
+                        if s_b.technology_water_amount != None and s_b.technology_bill_percentage != None:
+                            source_related_bills.append(s_b)
+                            total_water_for_resource += s_b.technology_water_amount
+                        else:
+                            should_calc_source = False
+                            break
+                    else:
+                        should_calc_source = False
+                        break
+                if should_calc_source and (len(source_gauge_stg) == len(source_related_bills)):
+                    for s_r_b in source_related_bills:
+                        if total_water_for_resource:
+                            if s_r_b.technology_power_consump != None:
+                                s_r_b.technology_power_consump += current_gauge_bill.power_consump * s_r_b.technology_water_amount / total_water_for_resource
+                                s_r_b.technology_bill_total += current_gauge_bill.bill_total * Decimal(
+                                    s_r_b.technology_water_amount / total_water_for_resource)
+                            else:
+                                s_r_b.technology_power_consump = current_gauge_bill.power_consump * s_r_b.technology_water_amount / total_water_for_resource
+                                s_r_b.technology_bill_total = current_gauge_bill.bill_total * Decimal(
+                                    s_r_b.technology_water_amount / total_water_for_resource)
+                        else:
+                            if s_r_b.technology_power_consump != None:
+                                s_r_b.technology_power_consump += current_gauge_bill.power_consump / len(source_related_bills)
+                                s_r_b.technology_bill_total += current_gauge_bill.bill_total / Decimal(len(source_related_bills))
+                            else:
+                                s_r_b.technology_power_consump = current_gauge_bill.power_consump / len(
+                                    source_related_bills)
+                                s_r_b.technology_bill_total = current_gauge_bill.bill_total / Decimal(
+                                    len(source_related_bills))
+
 
         # --- skip audit for the automatic updates
         g.skip_audit = True
@@ -1448,14 +1703,17 @@ def insert_or_edit_tech_bill(current_user):
         ).first()
 
         if bill:
-            # if data['technology_water_amount'] == 0:
-            #     return jsonify({"error": "يجب أن تكون كمية المياه المنتجة اكبر من صفر"})
-            # if data['technology_chlorine_consump'] == 0:
-            #     return jsonify({"error": "يجب أن تكون كمية الكلور المستهلكة اكبر من صفر"})
-            bill.technology_liquid_alum_consump = data['technology_liquid_alum_consump'] * 1000
-            bill.technology_solid_alum_consump = data['technology_solid_alum_consump'] * 1000
-            bill.technology_chlorine_consump = data['technology_chlorine_consump'] * 1000
-            bill.technology_water_amount = data['technology_water_amount']
+            if bill.technology_water_amount != None:
+                return jsonify({"error": "تم إدخال بيانات المحطة من قبل"}), 404
+            else:
+                # if data['technology_water_amount'] == 0:
+                #     return jsonify({"error": "يجب أن تكون كمية المياه المنتجة اكبر من صفر"})
+                # if data['technology_chlorine_consump'] == 0:
+                #     return jsonify({"error": "يجب أن تكون كمية الكلور المستهلكة اكبر من صفر"})
+                bill.technology_liquid_alum_consump = data['technology_liquid_alum_consump'] * 1000
+                bill.technology_solid_alum_consump = data['technology_solid_alum_consump'] * 1000
+                bill.technology_chlorine_consump = data['technology_chlorine_consump'] * 1000
+                bill.technology_water_amount = data['technology_water_amount']
         else:
             print("else")
             bill = TechnologyBill(
@@ -1470,11 +1728,16 @@ def insert_or_edit_tech_bill(current_user):
             )
             sgt = db.session.query(StationGaugeTechnology).filter(
                 StationGaugeTechnology.station_id == bill.station_id,
-                StationGaugeTechnology.technology_id == bill.technology_id).first()
+                StationGaugeTechnology.technology_id == bill.technology_id,
+                StationGaugeTechnology.relation_status == True,
+                StationGaugeTechnology.is_source == False).first()
+            if not sgt:
+                return jsonify({"error": "هذه المحطة غير مربوطة بعداد، برجاء ربط المحطة أولا"}), 405
             # print(sgt.to_dict())
             gauge_sgts = db.session.query(StationGaugeTechnology).filter(
                 StationGaugeTechnology.account_number == sgt.account_number,
-                StationGaugeTechnology.relation_status == True).all()
+                StationGaugeTechnology.relation_status == True,
+                StationGaugeTechnology.is_source == False).all()
             if len(gauge_sgts) == 1:
                 bill.technology_bill_percentage = 100
             db.session.add(bill)
@@ -1520,11 +1783,15 @@ def insert_or_edit_tech_bill(current_user):
             # get related tech bills of related gauge
             sgt = db.session.query(StationGaugeTechnology).filter(
                 StationGaugeTechnology.station_id == bill.station_id,
-                StationGaugeTechnology.technology_id == bill.technology_id).first()
+                StationGaugeTechnology.technology_id == bill.technology_id,
+                StationGaugeTechnology.relation_status == True,
+                StationGaugeTechnology.is_source == False
+            ).first()
             print(sgt.to_dict())
             gauge_sgts = db.session.query(StationGaugeTechnology).filter(
                 StationGaugeTechnology.account_number == sgt.account_number,
-                StationGaugeTechnology.relation_status == True).all()
+                StationGaugeTechnology.relation_status == True,
+                StationGaugeTechnology.is_source == False).all()
             print(gauge_sgts)
             related_bills = []
             for gauge_sgt in gauge_sgts:
@@ -1564,6 +1831,70 @@ def insert_or_edit_tech_bill(current_user):
 
         # --- skip audit for the automatic updates
         g.skip_audit = True
+
+        #TODO: add source power if exist
+        should_calc_source = True
+        source_stg = StationGaugeTechnology.query.filter(
+            StationGaugeTechnology.station_id == bill.station_id,
+            StationGaugeTechnology.technology_id == bill.technology_id,
+            StationGaugeTechnology.relation_status == True,
+            StationGaugeTechnology.is_source == True
+        ).first()
+        if not source_stg:
+            should_calc_source = False
+        else:
+            current_gauge_bill = GuageBill.query.filter(
+                GuageBill.account_number == source_stg.account_number,
+                GuageBill.bill_month == bill.bill_month,
+                GuageBill.bill_year == bill.bill_year
+            ).first()
+            if not current_gauge_bill:
+                should_calc_source = False
+            else:
+                source_gauge_stg = StationGaugeTechnology.query.filter(
+                    StationGaugeTechnology.account_number == current_gauge_bill.account_number,
+                    StationGaugeTechnology.relation_status == True,
+                    StationGaugeTechnology.is_source == True
+                ).all()
+                source_related_bills = []
+                total_water_for_resource = 0
+                for each_rel in source_gauge_stg:
+                    s_b = TechnologyBill.query.filter(
+                        TechnologyBill.station_id == each_rel.station_id,
+                        TechnologyBill.technology_id == each_rel.technology_id,
+                        TechnologyBill.bill_month == bill.bill_month,
+                        TechnologyBill.bill_year == bill.bill_year
+                    ).first()
+                    if s_b:
+                        if s_b.technology_water_amount != None and s_b.technology_bill_percentage != None:
+                            source_related_bills.append(s_b)
+                            total_water_for_resource += s_b.technology_water_amount
+                        else:
+                            should_calc_source = False
+                            break
+                    else:
+                        should_calc_source = False
+                        break
+                if should_calc_source and (len(source_gauge_stg) == len(source_related_bills)):
+                    for s_r_b in source_related_bills:
+                        if total_water_for_resource:
+                            if s_r_b.technology_power_consump != None:
+                                s_r_b.technology_power_consump += current_gauge_bill.power_consump * s_r_b.technology_water_amount / total_water_for_resource
+                                s_r_b.technology_bill_total += current_gauge_bill.bill_total * Decimal(
+                                    s_r_b.technology_water_amount / total_water_for_resource)
+                            else:
+                                s_r_b.technology_power_consump = current_gauge_bill.power_consump * s_r_b.technology_water_amount / total_water_for_resource
+                                s_r_b.technology_bill_total = current_gauge_bill.bill_total * Decimal(
+                                    s_r_b.technology_water_amount / total_water_for_resource)
+                        else:
+                            if s_r_b.technology_power_consump != None:
+                                s_r_b.technology_power_consump += current_gauge_bill.power_consump / len(source_related_bills)
+                                s_r_b.technology_bill_total += current_gauge_bill.bill_total / Decimal(len(source_related_bills))
+                            else:
+                                s_r_b.technology_power_consump = current_gauge_bill.power_consump / len(
+                                    source_related_bills)
+                                s_r_b.technology_bill_total = current_gauge_bill.bill_total / Decimal(
+                                    len(source_related_bills))
 
         try:
             db.session.commit()
@@ -1646,8 +1977,17 @@ def edit_old_tech_bills(tech_bill_id, current_user):
         bill.technology_solid_alum_consump = data['technology_solid_alum_consump'] * 1000
         bill.technology_liquid_alum_consump = data['technology_liquid_alum_consump'] * 1000
 
+        rel_to_source = StationGaugeTechnology.query.filter(
+                    StationGaugeTechnology.station_id == station_id,
+                    StationGaugeTechnology.technology_id == technology_id,
+                    StationGaugeTechnology.relation_status == True,
+                    StationGaugeTechnology.is_source == True
+                ).first()
+
         if bill.technology_water_amount == data['technology_water_amount']:
             return try_commit()
+        elif rel_to_source:
+            return jsonify({"error": "المحطة لها ماخذ منفصل، لا يمكن تعديل كمية المياه"}), 404
         else:
             bill.technology_water_amount = data['technology_water_amount']
             commit_result = try_commit()
@@ -1657,11 +1997,14 @@ def edit_old_tech_bills(tech_bill_id, current_user):
                 curr_rel = db.session.query(StationGaugeTechnology).filter(
                     StationGaugeTechnology.station_id == station_id,
                     StationGaugeTechnology.technology_id == technology_id,
+                    StationGaugeTechnology.relation_status == True,
+                    StationGaugeTechnology.is_source == False
                 ).first()
                 gauge_sgts = db.session.query(StationGaugeTechnology).filter(
                     and_(
                         StationGaugeTechnology.account_number == curr_rel.account_number,
-                        StationGaugeTechnology.relation_status == True
+                        StationGaugeTechnology.relation_status == True,
+                        StationGaugeTechnology.is_source == False
                     )
                 ).all()
                 tech_bills_related = []
@@ -1680,10 +2023,14 @@ def edit_old_tech_bills(tech_bill_id, current_user):
                     total_water = 0
                     total_power = 0
                     total_bill = 0
+                    calc_percent_only = False
                     for rel_bill in tech_bills_related:
                         total_water += rel_bill.technology_water_amount
-                        total_power += rel_bill.technology_power_consump
-                        total_bill += rel_bill.technology_bill_total
+                        if rel_bill.technology_power_consump:
+                            total_power += rel_bill.technology_power_consump
+                            total_bill += rel_bill.technology_bill_total
+                        else:
+                            calc_percent_only = True
 
                     # --- skip audit for the automatic updates
                     g.skip_audit = True
@@ -1691,13 +2038,15 @@ def edit_old_tech_bills(tech_bill_id, current_user):
                     if total_water == 0:
                         for rel_bill in tech_bills_related:
                             rel_bill.technology_bill_percentage = 100 / len(tech_bills_related)
-                            rel_bill.technology_power_consump = total_power * rel_bill.technology_bill_percentage / 100
-                            rel_bill.technology_bill_total = total_bill * Decimal(str(rel_bill.technology_bill_percentage)) / 100
+                            if not calc_percent_only:
+                                rel_bill.technology_power_consump = total_power * rel_bill.technology_bill_percentage / 100
+                                rel_bill.technology_bill_total = total_bill * Decimal(str(rel_bill.technology_bill_percentage)) / 100
                     else:
                         for rel_bill in tech_bills_related:
                             rel_bill.technology_bill_percentage = (rel_bill.technology_water_amount / total_water) * 100
-                            rel_bill.technology_power_consump = total_power * rel_bill.technology_bill_percentage / 100
-                            rel_bill.technology_bill_total = total_bill * Decimal(str(rel_bill.technology_bill_percentage)) / 100
+                            if not calc_percent_only:
+                                rel_bill.technology_power_consump = total_power * rel_bill.technology_bill_percentage / 100
+                                rel_bill.technology_bill_total = total_bill * Decimal(str(rel_bill.technology_bill_percentage)) / 100
 
                     try_commit()
 

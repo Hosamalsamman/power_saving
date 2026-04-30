@@ -154,6 +154,7 @@ class StationGaugeTechnology(db.Model):
     technology_id = db.Column(Integer, db.ForeignKey('technologies.technology_id'), primary_key=True)
     account_number = db.Column(NVARCHAR(50), db.ForeignKey('guages.account_number'), primary_key=True)
     relation_status = db.Column(Boolean, nullable=False)
+    is_source = db.Column(Boolean, nullable=False)
 
     station = db.relationship('Station', back_populates='station_techs')
     technology = db.relationship('Technology', back_populates='station_techs')
