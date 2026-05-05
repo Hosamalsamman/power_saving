@@ -5,7 +5,7 @@ import numpy as np
 from flask import Flask, abort, jsonify, render_template, request, make_response, current_app, g, has_request_context, session as flask_session
 from seaborn._marks.area import Area
 from sklearn.metrics import r2_score, mean_absolute_error
-from sqlalchemy import and_, or_, not_, func, case, event, inspect, desc
+from sqlalchemy import and_, or_, not_, func, case, event, inspect, desc, exists
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError, DataError
 from flask_cors import CORS
 from models import *
@@ -703,6 +703,7 @@ def home(current_user):
         over_liquid_alum_consump=over_liquid_alum_consump,
         over_water_stations=over_water_bills_list,
         over_power_for_0_water=over_power_for_0_water,
+        water_with_missing_power=water_with_missing_power,
     )
 
     # return jsonify({"message": "برجاء تسجيل الفواتير لمتابعة الاستهلاكات السنوية"})
@@ -1018,11 +1019,21 @@ def add_new_stg(current_user):
     if request.method == "POST":
         data = request.get_json()
         print(data)
+        conflict_exists = db.session.query(
+            exists().where(
+                StationGaugeTechnology.account_number == data['account_number'],
+                StationGaugeTechnology.relation_status == True,
+                StationGaugeTechnology.is_source != data['is_source']
+            )
+        ).scalar()
+        if conflict_exists:
+            return jsonify({"error": "عداد المحطة لا يمكن ان يكون عداد مأخذ أو العكس"}), 405
         new_stg = StationGaugeTechnology(
             station_id=data['station_id'],
             technology_id=data['technology_id'],
             account_number=data['account_number'],
-            relation_status=True
+            relation_status=True,
+            is_source=data['is_source'],
         )
 
         db.session.add(new_stg)
