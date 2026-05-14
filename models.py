@@ -259,6 +259,8 @@ class TechnologyBill(db.Model):
     technology_solid_alum_consump = db.Column(Float)
     technology_chlorine_consump = db.Column(Float)
     technology_water_amount = db.Column(Float)
+    measured_water = db.Column(Float)
+    calculated_water = db.Column(Float)
     technology_bill_total = db.Column(Numeric(19, 4), nullable=True)
     power_per_water = db.Column(Float)
     chlorine_range_from = db.Column(Float)

@@ -475,7 +475,7 @@ def get_season(month):
 
 
 @app.route("/")
-@private_route([1, 2, 3, 4, 5, 6, 7])
+@private_route([1, 2, 3, 4, 5, 7])
 def home(current_user):
     current_year = datetime.now().year
     valid_percent = TechnologyBill.technology_bill_percentage.isnot(None)
@@ -652,7 +652,7 @@ def home(current_user):
                                                       bill.technology_liquid_alum_consump / bill.technology_water_amount) > bill.liquid_alum_range_to or (
                                                       bill.technology_liquid_alum_consump / bill.technology_water_amount) < bill.liquid_alum_range_from):
                 over_liquid_alum_consump.append(bill.to_dict())
-            elif (bill.technology_water_amount == None or bill.technology_water_amount == 0) and bill.technology_power_consump > 1200:
+            elif bill.technology_power_consump and (bill.technology_water_amount == None or bill.technology_water_amount == 0) and bill.technology_power_consump > 1200:
                 over_power_for_0_water.append(bill.to_dict())
     # query with group by station to compare with water capacity
     query = (
@@ -711,7 +711,7 @@ def home(current_user):
 
 
 @app.route("/stations")
-@private_route([1, 2, 3, 6, 7])
+@private_route([1, 2, 3, 7])
 def stations(current_user):
     # print(current_user.emp_code) pass current_user as input to func to access the object
     all_stations = db.session.query(Station).all()
@@ -720,7 +720,7 @@ def stations(current_user):
 
 
 @app.route("/edit-station/<station_id>", methods=["GET", "POST"])
-@private_route([1, 2, 6])
+@private_route([1, 2])
 def edit_station(station_id, current_user):
     station = db.session.get(Station, station_id)
 
@@ -812,7 +812,7 @@ def add_new_station(current_user):
 
 
 @app.route("/technologies")
-@private_route([1, 2, 3, 6, 7])
+@private_route([1, 2, 3, 7])
 def technologies(current_user):
     all_techs = db.session.query(Technology).all()
     techs_list = [tech.to_dict() for tech in all_techs]
@@ -1503,6 +1503,8 @@ def edit_tech_bill(tech_bill_id, current_user):
 
     if request.method == "POST":
         data = request.get_json()
+        if data['technology_water_amount'] != data['measured_water'] + data['calculated_water']:
+            return jsonify({"error": "كمية المياه الاجمالية غير مطابقة لمجموع المقاس والمحسوب"}), 405
 
         g.skip_audit = True
         bill.power_per_water = bill.technology.power_per_water
@@ -1516,6 +1518,8 @@ def edit_tech_bill(tech_bill_id, current_user):
         bill.technology_solid_alum_consump = data['technology_solid_alum_consump'] * 1000
         bill.technology_chlorine_consump = data['technology_chlorine_consump'] * 1000
         bill.technology_water_amount = data['technology_water_amount']
+        bill.measured_water = data['measured_water']
+        bill.calculated_water = data['calculated_water']
 
         try:
             db.session.commit()
@@ -1712,6 +1716,11 @@ def insert_or_edit_tech_bill(current_user):
             TechnologyBill.station_id == data["station_id"],
             TechnologyBill.technology_id == data["technology_id"],
         ).first()
+        # print(data['technology_water_amount'])
+        # print(data['measured_water'])
+        # print(data['calculated_water'])
+        if data['technology_water_amount'] != data['measured_water'] + data['calculated_water']:
+            return jsonify({"error": "كمية المياه الاجمالية غير مطابقة لمجموع المقاس والمحسوب"}), 405
 
         if bill:
             if bill.technology_water_amount != None:
@@ -1725,8 +1734,10 @@ def insert_or_edit_tech_bill(current_user):
                 bill.technology_solid_alum_consump = data['technology_solid_alum_consump'] * 1000
                 bill.technology_chlorine_consump = data['technology_chlorine_consump'] * 1000
                 bill.technology_water_amount = data['technology_water_amount']
+                bill.measured_water = data['measured_water']
+                bill.calculated_water = data['calculated_water']
         else:
-            print("else")
+            # print("else")
             bill = TechnologyBill(
                 bill_year=data["bill_year"],
                 bill_month=data["bill_month"],
@@ -1736,6 +1747,8 @@ def insert_or_edit_tech_bill(current_user):
                 technology_solid_alum_consump=data["technology_solid_alum_consump"] * 1000,
                 technology_chlorine_consump=data["technology_chlorine_consump"] * 1000,
                 technology_water_amount=data["technology_water_amount"],
+                measured_water=data["measured_water"],
+                calculated_water=data["calculated_water"],
             )
             sgt = db.session.query(StationGaugeTechnology).filter(
                 StationGaugeTechnology.station_id == bill.station_id,
@@ -1843,7 +1856,7 @@ def insert_or_edit_tech_bill(current_user):
         # --- skip audit for the automatic updates
         g.skip_audit = True
 
-        #TODO: add source power if exist
+        # add source power if exist
         should_calc_source = True
         source_stg = StationGaugeTechnology.query.filter(
             StationGaugeTechnology.station_id == bill.station_id,
@@ -1938,7 +1951,7 @@ def insert_or_edit_tech_bill(current_user):
 
 
 @app.route("/view-tech-bills", methods=["GET"])
-@private_route([1, 2, 3, 6, 7])
+@private_route([1, 2, 3, 7])
 def view_tech_bills(current_user):
     tech_bills = db.session.query(TechnologyBill).filter(TechnologyBill.technology_bill_percentage.isnot(None)).all()
     t_b_list = [bill.to_dict() for bill in tech_bills]
@@ -2000,7 +2013,11 @@ def edit_old_tech_bills(tech_bill_id, current_user):
         elif rel_to_source:
             return jsonify({"error": "المحطة لها ماخذ منفصل، لا يمكن تعديل كمية المياه"}), 404
         else:
+            if data['technology_water_amount'] != data['measured_water'] + data['calculated_water']:
+                return jsonify({"error": "كمية المياه الاجمالية غير مطابقة لمجموع المقاس والمحسوب"}), 405
             bill.technology_water_amount = data['technology_water_amount']
+            bill.measured_water = data['measured_water']
+            bill.calculated_water = data['calculated_water']
             commit_result = try_commit()
             if bill.technology_bill_percentage == None:
                 return commit_result
@@ -2114,7 +2131,7 @@ def edit_voltage_cost(voltage_id, current_user):
 
 
 @app.route("/chemicals")
-@private_route([1, 4, 6, 7])
+@private_route([1, 4, 7])
 def chemicals(current_user):
     chemicals = db.session.query(AlumChlorineReference).all()
     userschemicals_list = [chemical.to_dict() for chemical in chemicals]
@@ -2268,6 +2285,8 @@ def show_charts(station_id, tech_id):
     ).all()
     bills_list = [row.to_dict() for row in tech_bills]
     df_bills = pd.DataFrame(bills_list)
+    df_bills['calculated_water'] = df_bills['calculated_water'].fillna(0)
+    df_bills['measured_water'] = df_bills['measured_water'].fillna(0)
     df_bills.dropna(inplace=True)
     if not df_bills.empty:
         df_bills = df_bills[df_bills['technology_water_amount'] != 0]
@@ -2911,7 +2930,7 @@ def new_annual_bill(meter_id, current_user):
 
 
 @app.route("/prediction/<station_id>", methods=["GET", "POST"])
-@private_route([1, 2, 6, 7])
+@private_route([1, 2, 7])
 def predict(station_id, current_user):
     if request.method == "POST":
         station_bills = db.session.query(TechnologyBill).filter(
@@ -3009,7 +3028,7 @@ def predict(station_id, current_user):
 
 
 @app.route("/reports", methods=["GET", "POST"])
-@private_route([1, 2, 3, 4, 6, 7])
+@private_route([1, 2, 3, 4, 7])
 def show_reports(current_user):
     if request.method == "POST":
         data = request.get_json()
@@ -3688,7 +3707,7 @@ def show_reports(current_user):
 
 # Planning sector routes
 @app.route("/all-areas")
-@private_route([1, 5, 6])
+@private_route([1, 2, 5])
 def all_areas(current_user):
     areas = db.session.query(AreaOfService).all()
     areas_list = [area.to_dict() for area in areas]
@@ -3766,7 +3785,7 @@ def add_new_area(current_user):
 
 
 @app.route("/place-types")
-@private_route([1, 5, 6])
+@private_route([1, 5])
 def place_types(current_user):
     all_types = db.session.query(PlaceType).all()
     all_types_list = [p_type.to_dict() for p_type in all_types]
@@ -3811,7 +3830,7 @@ def edit_place_type(place_type_id, current_user):
 
 
 @app.route("/places")
-@private_route([1, 5, 6])
+@private_route([1, 5])
 def get_places(current_user):
     all_places = db.session.query(Place).all()
     all_places_list = [place.to_dict() for place in all_places]
@@ -3998,7 +4017,7 @@ def add_new_population(place_id, current_user):
 
 
 @app.route("/balance-plot-calc/<area_id>", methods=["GET", "POST"])
-@private_route([1, 5, 6])
+@private_route([1, 5])
 def balance_plot_calc(area_id, current_user):
     current_area = db.session.get(AreaOfService, area_id)
     current_area_data = current_area.to_dict()
@@ -4660,7 +4679,7 @@ def login():
 
 
 @app.route("/change-password", methods=["GET", "POST"])
-@private_route([1, 2, 3, 4, 5, 6, 7])
+@private_route([1, 2, 3, 4, 5, 7])
 def change_password(current_user):
     if request.method == "POST":
         data = request.get_json()
