@@ -3010,7 +3010,7 @@ def predict(station_id, current_user):
         if predicted_time_index < df_monthly_bills["time_index"].min():
             return jsonify({
                 "error": "القيمة المتوقعة أقل من البيانات المتوفرة، مما يجعل التوقع غير منطقي."
-            }), 407
+            }), 404
         predicted_year = int(predicted_time_index // 12)
         predicted_month = int(predicted_time_index % 12)
         if predicted_month == 0:
@@ -4019,6 +4019,8 @@ def add_new_population(place_id, current_user):
 @app.route("/balance-plot-calc/<area_id>", methods=["GET", "POST"])
 @private_route([1, 5])
 def balance_plot_calc(area_id, current_user):
+    import pandas as pd
+    import numpy as np
     current_area = db.session.get(AreaOfService, area_id)
     current_area_data = current_area.to_dict()
     current_area_data["stations"] = [station.to_dict() for station in current_area.stations]
@@ -4028,37 +4030,39 @@ def balance_plot_calc(area_id, current_user):
     if request.method == "POST":
         data = request.get_json()
         print(data)
-        total_stations_capacity = 0
-        for station in current_area.stations:
-            total_stations_capacity += station.station_water_capacity
+
+        total_stations_capacity = sum(
+            station.station_water_capacity for station in current_area.stations
+        )
+
         if data["calc_type"] == "machine_learning":
+
+            # ── Water production data ─────────────────────────────────────
             results = (
                 db.session.query(
-                TechnologyBill.bill_month,
-                TechnologyBill.bill_year,
-                func.sum(TechnologyBill.technology_water_amount).label("total_water"),
+                    TechnologyBill.bill_month,
+                    TechnologyBill.bill_year,
+                    func.sum(TechnologyBill.technology_water_amount).label("total_water"),
                 )
-                .join(
-                    TechnologyBill.station
-                )
+                .join(TechnologyBill.station)
                 .filter(
                     Station.station_type == "مياة",
                     TechnologyBill.technology_water_amount.isnot(None),
                     Station.area_id == area_id
                 )
-                .group_by(
-                    TechnologyBill.bill_month,
-                    TechnologyBill.bill_year
-                )
-                .order_by(
-                    TechnologyBill.bill_month,
-                    TechnologyBill.bill_year
-                )
+                .group_by(TechnologyBill.bill_month, TechnologyBill.bill_year)
+                .order_by(TechnologyBill.bill_year, TechnologyBill.bill_month)  # ← fixed order
                 .all()
             )
-            df = pd.DataFrame(results, columns=["month", "year", "total_water"])
-            pop_data = defaultdict(list)
 
+            if not results:
+                print("No water production data found for this area.")
+                return jsonify({"error": "No water production data found for this area."}), 400
+
+            df = pd.DataFrame(results, columns=["month", "year", "total_water"])
+
+            # ── Population per month ──────────────────────────────────────
+            pop_data = defaultdict(list)
             for p in current_area.places:
                 pops = (
                     db.session.query(PlacePopulation)
@@ -4069,221 +4073,731 @@ def balance_plot_calc(area_id, current_user):
                 if len(pops) >= 2:
                     pop_data[p.place_id] = pops
 
-            def estimate_monthly_population(populations, target_year, target_month):
-                """
-                pops: ordered desc by population_year
-                """
-                latest, previous = populations[0], populations[1]
+            if not pop_data:
+                print("No population data found. Need ≥2 records per place.")
+                return jsonify({"error": "No population data found. Need ≥2 records per place."}), 400
 
-                # Annual growth rate
+            def estimate_monthly_population(populations, target_year, target_month):
+                latest, previous = populations[0], populations[1]
                 r = ((latest.population / previous.population) ** (
                         1 / (latest.population_year - previous.population_year)
                 )) - 1
-
-                # Monthly growth rate
                 monthly_r = (1 + r) ** (1 / 12) - 1
-
-                # Month difference
                 months_diff = (
                         (target_year - latest.population_year) * 12
                         + (target_month - 1)
                 )
-
                 return latest.population * ((1 + monthly_r) ** months_diff)
 
             area_population = []
-
             for _, row in df.iterrows():
-                total_pop = 0
-
-                for place_id, pops in pop_data.items():
-                    total_pop += estimate_monthly_population(
-                        pops,
-                        row["year"],
-                        row["month"]
-                    )
-
+                total_pop = sum(
+                    estimate_monthly_population(pops, int(row["year"]), int(row["month"]))
+                    for place_id, pops in pop_data.items()
+                )
                 area_population.append(total_pop)
 
             df["population"] = area_population
             df["month_sin"] = np.sin(2 * np.pi * df["month"] / 12)
             df["month_cos"] = np.cos(2 * np.pi * df["month"] / 12)
-            df.info()
-            df.head()
-
             df = df.sort_values(["year", "month"]).reset_index(drop=True)
+            """
+            Water Demand Forecasting Pipeline
+            ──────────────────────────────────
+            Per-area AutoML pipeline with cross-validation, automatic feature set
+            selection (year vs population), and saturation date estimation.
 
-            split_idx = int(len(df) * 0.8)
+            Usage:
+                from water_demand_forecast import run_forecast
+                results = run_forecast(df, total_stations_capacity, area_name="Area_A")
+            """
 
-            # train_df = df.iloc[:split_idx]
-            # test_df = df.iloc[split_idx:]
+            import numpy as np
+            import pandas as pd
+            import matplotlib.pyplot as plt
+            import warnings
+            warnings.filterwarnings("ignore")
 
-            # df["year_index"] = df["year"] - df["year"].min()
+            from scipy.stats import linregress
+            from scipy.optimize import brentq
 
-            # features = ["population", "month_sin", "month_cos"]
-            # # Optional trend
-            # if "year_index" in df.columns:
-            #     features.append("year_index")
-            #
-            # X_train = train_df[features]
-            # y_train = train_df["total_water"]
-            #
-            # X_test = test_df[features]
-            # y_test = test_df["total_water"]
-            #
-            # model = LinearRegression()
-            # model.fit(X_train, y_train)
-            #
-            # y_pred = model.predict(X_test)
-            #
-            # print("R²:", r2_score(y_test, y_pred))
-            # print("MAE:", mean_absolute_error(y_test, y_pred))
-            #
-            # plt.figure()
-            # plt.plot(y_test.values, label="Actual")
-            # plt.plot(y_pred, label="Predicted")
-            # plt.legend()
-            # plt.title("Actual vs Predicted Water Production")
-            # plt.show()
-            # # This is GOLD
-            # coef_df = pd.DataFrame({
-            #     "feature": features,
-            #     "coefficient": model.coef_
-            # })
-            #
-            # print(coef_df)
-            #
-            # # 1️⃣ Seasonal peak month
-            # beta_2, beta_3 = model.coef_[features.index("month_sin")], model.coef_[features.index("month_cos")]
-            # month_angle = np.arctan2(beta_2, beta_3)
-            # peak_month = ((month_angle / (2 * np.pi)) * 12) % 12
-            # peak_month = int(np.round(peak_month)) + 1
-            # print(f"peak month: {peak_month}")
-            #
-            # # 2️⃣ Solve for population at max water
-            # target_water = total_stations_capacity  # or observed max
-            # beta_0 = model.intercept_
-            # beta_1 = model.coef_[features.index("population")]
-            # # beta_4 = model.coef_[features.index("year_index")]
-            #
-            # # Assume seasonal_peak = beta_2*sin + beta_3*cos
-            # seasonal_peak = beta_2 * np.sin(2 * np.pi * peak_month / 12) + beta_3 * np.cos(2 * np.pi * peak_month / 12)
-            #
-            # # Need year_index guess (start with 0)
-            # year_index_guess = 0  # will refine iteratively if needed
-            # pop_max = (target_water - (beta_0 + seasonal_peak)) / beta_1  #  + beta_4 * year_index_guess
-            #
-            # # 3️⃣ Convert population to year/month
-            # P0 = df["population"].iloc[-1]  # last known population
-            # monthly_rate = ((P0 / df["population"].iloc[-2]) ** (1 / 12)) - 1
-            # months_diff = np.log(pop_max / P0) / np.log(1 + monthly_rate)
-            #
-            # year = int(df["year"].iloc[-1] + months_diff // 12)
-            # month = int((months_diff % 12) + 1)
-            #
-            # print("Max production occurs at population:", int(pop_max))
-            # print("Predicted year/month:", year, month)
-            # Apply Log Transform
-            train_df = df.iloc[:split_idx].copy()
-            test_df = df.iloc[split_idx:].copy()
-            # Apply Log Transform
-            train_df["log_population"] = np.log(train_df["population"])
-            train_df["log_water"] = np.log(train_df["total_water"])
+            from sklearn.pipeline import Pipeline
+            from sklearn.preprocessing import StandardScaler
+            from sklearn.linear_model import LinearRegression, Ridge, Lasso
+            from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+            from sklearn.svm import SVR
+            from sklearn.model_selection import TimeSeriesSplit, cross_val_score, train_test_split, GridSearchCV
+            from sklearn.metrics import r2_score, mean_absolute_error
 
-            test_df["log_population"] = np.log(test_df["population"])
-            test_df["log_water"] = np.log(test_df["total_water"])
+            # ═══════════════════════════════════════════════════════════════════════
+            # CONSTANTS
+            # ═══════════════════════════════════════════════════════════════════════
 
-            # --- 2. Define Features and Target ---
-            features = ["log_population", "month_sin", "month_cos"]
+            LINEAR_MODELS = {"LinearRegression", "Ridge", "Lasso"}
+            TREE_MODELS = {"RandomForest", "GradientBoosting"}
+            SVR_MODELS = {"SVR"}
 
-            if "year_index" in train_df.columns:
-                features.append("year_index")
+            CANDIDATE_MODELS = {
+                "LinearRegression": LinearRegression(),
+                "Ridge": Ridge(),
+                "Lasso": Lasso(),
+                "RandomForest": RandomForestRegressor(n_estimators=100, random_state=42),
+                "GradientBoosting": GradientBoostingRegressor(n_estimators=100, random_state=42),
+                "SVR": SVR(kernel="rbf"),
+            }
 
-            X_train = train_df[features]
-            y_train = train_df["log_water"]  # Target is now Log(Water)
+            # Hyperparameter grids — only tuned for the winning model
+            PARAM_GRIDS = {
+                "Ridge": {"model__alpha": [0.01, 0.1, 1.0, 10.0, 100.0]},
+                "Lasso": {"model__alpha": [0.001, 0.01, 0.1, 1.0]},
+                "RandomForest": {"model__n_estimators": [100, 200],
+                                 "model__max_depth": [None, 10, 20],
+                                 "model__min_samples_leaf": [1, 3]},
+                "GradientBoosting": {"model__n_estimators": [100, 200],
+                                     "model__learning_rate": [0.05, 0.1, 0.2],
+                                     "model__max_depth": [3, 5]},
+                "SVR": {"model__C": [1, 10, 100],
+                        "model__epsilon": [0.05, 0.1, 0.2]},
+            }
 
-            X_test = test_df[features]
-            y_test_original = test_df["total_water"]
+            # ═══════════════════════════════════════════════════════════════════════
+            # STEP 1 — VALIDATION
+            # Fail loudly before any computation on bad data
+            # ═══════════════════════════════════════════════════════════════════════
 
-            # --- 3. Train Model ---
-            model = LinearRegression()
-            model.fit(X_train, y_train)
+            def validate_inputs(df, total_stations_capacity):
+                required_cols = ["year", "month", "total_water", "population"]
+                missing = [c for c in required_cols if c not in df.columns]
+                if missing:
+                    print(f"VALIDATION FAIL — missing columns: {missing}")
+                    raise ValueError(f"Missing columns: {missing}")
 
-            # --- 4. Calculate Smearing Factor (Bias Correction) ---
-            # Calculate residuals on the training set (Log scale)
-            train_predictions_log = model.predict(X_train)
-            residuals = y_train - train_predictions_log
-            smearing_factor = np.mean(np.exp(residuals))
+                if (df["total_water"] <= 0).any():
+                    print("VALIDATION FAIL — total_water has zeros or negatives")
+                    print(df[df["total_water"] <= 0])
+                    raise ValueError("total_water contains zeros or negatives")
 
-            print(f"Smearing Factor (Bias Correction): {smearing_factor:.4f}")
+                if (df["population"] <= 0).any():
+                    print("VALIDATION FAIL — population has zeros or negatives")
+                    print(df[df["population"] <= 0])
+                    raise ValueError("population contains zeros or negatives")
 
-            # --- 5. Predict and Inverse Transform WITH Correction ---
-            y_pred_log = model.predict(X_test)
-            # Apply exp() AND multiply by the smearing factor
-            y_pred = np.exp(y_pred_log) * smearing_factor
+                if df[required_cols].isna().any().any():
+                    print("VALIDATION FAIL — NaN values found")
+                    print(df[required_cols].isna().sum())
+                    raise ValueError(f"NaN values found")
 
-            # --- 6. Evaluate ---
-            print("R² (Original Scale):", r2_score(y_test_original, y_pred))
-            print("MAE (Original Scale):", mean_absolute_error(y_test_original, y_pred))
+                if total_stations_capacity <= 0:
+                    print("VALIDATION FAIL — total_stations_capacity is zero or negative:", total_stations_capacity)
+                    raise ValueError("total_stations_capacity must be positive.")
 
-            plt.figure()
-            plt.plot(y_test_original.values, label="Actual")
-            plt.plot(y_pred, label="Predicted (Corrected)")
-            plt.legend()
-            plt.title("Actual vs Predicted Water Production (Log-Log + Smearing)")
-            plt.show()
+                if len(df) < 24:
+                    print(f"VALIDATION FAIL — only {len(df)} rows, need at least 24")
+                    raise ValueError(f"Only {len(df)} rows — need at least 24 months")
 
-            # --- 7. Inspect Coefficients ---
-            coef_df = pd.DataFrame({
-                "feature": features,
-                "coefficient": model.coef_
+                print("✓ Input validation passed")
+
+            # ═══════════════════════════════════════════════════════════════════════
+            # STEP 2 — FEATURE ENGINEERING
+            # ═══════════════════════════════════════════════════════════════════════
+
+            def engineer_features(df):
+                """
+                Adds all derived columns needed by both feature sets.
+                Cyclical encoding of month (sin/cos) is mathematically correct
+                for seasonal patterns — it tells the model that month 12 and
+                month 1 are adjacent, which a raw integer cannot express.
+                """
+                df = df.copy()
+                df = df.sort_values(["year", "month"]).reset_index(drop=True)
+
+                df["month_sin"] = np.sin(2 * np.pi * df["month"] / 12)
+                df["month_cos"] = np.cos(2 * np.pi * df["month"] / 12)
+                df["log_population"] = np.log(df["population"])
+                df["log_water"] = np.log(df["total_water"])
+
+                return df
+
+            # ═══════════════════════════════════════════════════════════════════════
+            # STEP 3 — FEATURE SET SELECTION (year vs population)
+            # Run CV on both and pick the one with higher mean R²
+            # ═══════════════════════════════════════════════════════════════════════
+
+            def select_feature_set(df, cv):
+                """
+                Compares year-based vs population-based features using a simple
+                LinearRegression as a neutral referee — same model, different inputs.
+
+                Returns the winning feature_set label and prints a correlation
+                table so you can see why one won.
+                """
+                print("\n── Feature set selection ──────────────────────────────────")
+
+                # Collinearity check — confirms you can't use both
+                corr = df[["year", "population", "log_population", "log_water"]].corr()
+                year_pop_corr = abs(corr.loc["year", "population"])
+                print(f"year ↔ population correlation : {year_pop_corr:.3f}")
+                if year_pop_corr > 0.90:
+                    print("  → High collinearity confirmed — correct to use only one.")
+
+                # Correlation of each candidate with water demand
+                corr_water = df[["year", "population", "log_population"]].corrwith(df["log_water"])
+                print("\nCorrelation with log(water):")
+                for col, val in corr_water.items():
+                    print(f"  {col:<18} {val:.4f}")
+
+                # CV comparison using LinearRegression as neutral referee
+                feature_sets = {
+                    "year": ["year", "month_sin", "month_cos"],
+                    "population": ["log_population", "month_sin", "month_cos"],
+                }
+
+                scores_summary = {}
+                for label, feats in feature_sets.items():
+                    pipe = Pipeline([("scaler", StandardScaler()), ("model", LinearRegression())])
+                    scores = cross_val_score(pipe, df[feats], df["log_water"], cv=cv, scoring="r2")
+                    scores_summary[label] = scores.mean()
+                    print(f"\n  {label}-based  →  CV R² = {scores.mean():.4f} ± {scores.std():.4f}")
+
+                winner = max(scores_summary, key=scores_summary.get)
+                margin = abs(scores_summary["year"] - scores_summary["population"])
+
+                print(f"\n✓ Selected feature set : {winner}-based", end="")
+                if margin < 0.02:
+                    print(f"  (margin only {margin:.4f} — year preferred for simpler extrapolation)")
+                    winner = "year"  # tie goes to year — no growth rate needed
+                else:
+                    print(f"  (margin = {margin:.4f})")
+
+                return winner
+
+            # ═══════════════════════════════════════════════════════════════════════
+            # STEP 4 — PIPELINE FACTORY
+            # Each model type gets the right preprocessing
+            # ═══════════════════════════════════════════════════════════════════════
+
+            def make_pipeline(name, model, feature_set, df):
+                """
+                Builds (pipeline, features, target) for a given model and feature set.
+
+                Linear models  → StandardScaler + log-space target
+                Tree models    → no scaler (scale-invariant), raw target
+                SVR            → StandardScaler (needs it), raw target
+
+                Why no log transform for trees?
+                Trees split on thresholds like "population > 500k". Whether the data
+                is log-scaled or not doesn't change where the best splits are — the
+                tree will find them either way. Log-transforming adds complexity with
+                no benefit for tree-based models.
+                """
+                if feature_set == "year":
+                    features_linear = ["year", "month_sin", "month_cos"]
+                    features_tree = ["year", "month_sin", "month_cos"]
+                else:
+                    features_linear = ["log_population", "month_sin", "month_cos"]
+                    features_tree = ["population", "month_sin", "month_cos"]
+
+                if name in LINEAR_MODELS:
+                    pipe = Pipeline([("scaler", StandardScaler()), ("model", model)])
+                    features = features_linear
+                    target = df["log_water"]
+                    is_log = True
+
+                elif name in TREE_MODELS:
+                    pipe = Pipeline([("model", model)])
+                    features = features_tree
+                    target = df["total_water"]
+                    is_log = False
+
+                else:  # SVR
+                    pipe = Pipeline([("scaler", StandardScaler()), ("model", model)])
+                    features = features_tree
+                    target = df["total_water"]
+                    is_log = False
+
+                return pipe, features, target, is_log
+
+            # ═══════════════════════════════════════════════════════════════════════
+            # STEP 5 — AUTOML RACE
+            # CV all candidates, pick winner, tune hyperparameters
+            # ═══════════════════════════════════════════════════════════════════════
+
+            def run_model_race(df, feature_set, cv):
+                """
+                Runs cross-validation for every candidate model.
+                All CV scores are on the original (non-log) scale using
+                a consistent scorer so results are directly comparable.
+                """
+                print("\n── Model race ─────────────────────────────────────────────")
+                print(f"  {'Model':<22} {'Mean R²':>8} {'Std R²':>8} {'Features':>12}")
+                print("  " + "─" * 55)
+
+                results = {}
+
+                for name, model in CANDIDATE_MODELS.items():
+                    pipe, features, target, is_log = make_pipeline(name, model, feature_set, df)
+
+                    scores = cross_val_score(pipe, df[features], target, cv=cv, scoring="r2")
+
+                    results[name] = {
+                        "pipeline": pipe,
+                        "features": features,
+                        "target": target,
+                        "is_log": is_log,
+                        "mean_r2": scores.mean(),
+                        "std_r2": scores.std(),
+                    }
+
+                    feat_label = "log" if is_log else "raw"
+                    print(f"  {name:<22} {scores.mean():>8.4f} {scores.std():>8.4f} {feat_label:>12}")
+
+                best_name = max(results, key=lambda k: results[k]["mean_r2"])
+                print(f"\n✓ Best model (pre-tuning): {best_name}  "
+                      f"R²={results[best_name]['mean_r2']:.4f} ± {results[best_name]['std_r2']:.4f}")
+
+                return results, best_name
+
+            # ═══════════════════════════════════════════════════════════════════════
+            # STEP 6 — HYPERPARAMETER TUNING
+            # Only tune the winning model — no wasted computation
+            # ═══════════════════════════════════════════════════════════════════════
+
+            def tune_best_model(best_name, best_info, df, cv):
+                """
+                Runs GridSearchCV on the winning model only.
+                LinearRegression has no hyperparameters so it's skipped.
+                """
+                if best_name not in PARAM_GRIDS:
+                    print(f"\n── Tuning: {best_name} has no hyperparameters to tune — skipping")
+                    return best_info["pipeline"]
+
+                print(f"\n── Tuning {best_name} ──────────────────────────────────────")
+
+                grid_search = GridSearchCV(
+                    best_info["pipeline"],
+                    PARAM_GRIDS[best_name],
+                    cv=cv,
+                    scoring="r2",
+                    n_jobs=-1,  # use all CPU cores
+                    refit=True  # automatically refit on full data with best params
+                )
+                grid_search.fit(df[best_info["features"]], best_info["target"])
+
+                print(f"  Best params : {grid_search.best_params_}")
+                print(f"  Tuned R²    : {grid_search.best_score_:.4f}  "
+                      f"(was {best_info['mean_r2']:.4f})")
+
+                return grid_search.best_estimator_
+
+            # ═══════════════════════════════════════════════════════════════════════
+            # STEP 7 — FINAL EVALUATION
+            # One held-out test set — never seen during CV or tuning
+            # ═══════════════════════════════════════════════════════════════════════
+
+            def evaluate_final_model(best_pipeline, best_info, df, area_name):
+                """
+                Splits off the last 20% of time-ordered data as a true holdout.
+                Computes smearing factor for log-space models.
+                Plots actual vs predicted + residuals.
+                """
+                features = best_info["features"]
+                is_log = best_info["is_log"]
+
+                # Time-ordered split — last 20% is the holdout
+                split_idx = int(len(df) * 0.8)
+                X_train = df[features].iloc[:split_idx]
+                X_test = df[features].iloc[split_idx:]
+
+                if is_log:
+                    y_train = df["log_water"].iloc[:split_idx]
+                    y_test_original = df["total_water"].iloc[split_idx:]
+                else:
+                    y_train = df["total_water"].iloc[:split_idx]
+                    y_test_original = df["total_water"].iloc[split_idx:]
+
+                best_pipeline.fit(X_train, y_train)
+
+                # ── Smearing factor (log-space models only) ───────────────────────
+                # When you predict log(y) and invert with exp(), you get a
+                # systematically low estimate. The smearing factor (mean of
+                # exp(residuals)) corrects this bias. For raw-target models it's 1.0
+                if is_log:
+                    train_preds = best_pipeline.predict(X_train)
+                    residuals = y_train - train_preds
+                    smearing_factor = np.mean(np.exp(residuals))
+                    y_pred = np.exp(best_pipeline.predict(X_test)) * smearing_factor
+                else:
+                    smearing_factor = 1.0
+                    y_pred = best_pipeline.predict(X_test)
+
+                r2 = r2_score(y_test_original, y_pred)
+                mae = mean_absolute_error(y_test_original, y_pred)
+
+                print(f"\n── Final evaluation ({area_name}) ─────────────────────────")
+                print(f"  R²  (original scale) : {r2:.4f}")
+                print(f"  MAE (original scale) : {mae:.2f}")
+                print(f"  Smearing factor      : {smearing_factor:.4f}")
+
+                # ── Residual plot ─────────────────────────────────────────────────
+                # A good model has residuals scattered randomly around zero.
+                # A funnel shape = heteroscedasticity (worse at high values).
+                # A curve = missed non-linearity.
+                residuals_test = y_test_original.values - y_pred
+                fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+                fig.suptitle(f"{area_name} — Final Model Diagnostics", fontsize=13)
+
+                axes[0].plot(y_test_original.values, label="Actual", linewidth=1.5)
+                axes[0].plot(y_pred, label="Predicted", linewidth=1.5, linestyle="--")
+                axes[0].legend()
+                axes[0].set_title("Actual vs Predicted")
+                axes[0].set_ylabel("Water Production")
+
+                axes[1].scatter(y_pred, residuals_test, alpha=0.6, s=20)
+                axes[1].axhline(0, color="red", linestyle="--", linewidth=1)
+                axes[1].set_title("Residuals vs Fitted")
+                axes[1].set_xlabel("Predicted")
+                axes[1].set_ylabel("Residual")
+
+                plt.tight_layout()
+                plt.savefig(f"{area_name}_diagnostics.png", dpi=150, bbox_inches="tight")
+                plt.show()
+
+                return smearing_factor, r2, mae
+
+            # ═══════════════════════════════════════════════════════════════════════
+            # STEP 8 — POPULATION GROWTH RATE (used only if feature_set == "population")
+            # Fit log-linear trend over all years instead of using two data points
+            # ═══════════════════════════════════════════════════════════════════════
+
+            def estimate_growth_rate(df):
+                """
+                Fits log(population) ~ year using all available data.
+                Returns monthly_rate plus diagnostics so you can judge reliability.
+
+                Why log(population)?
+                Population grows exponentially. log() converts the curve to a
+                straight line, making linregress valid.
+                """
+                years = df["year"].values.astype(float)
+                log_pop = np.log(df["population"].values)
+
+                slope, intercept, r_value, p_value, std_err = linregress(years, log_pop)
+
+                annual_rate = np.exp(slope) - 1
+                monthly_rate = (1 + annual_rate) ** (1 / 12) - 1
+
+                print(f"\n── Population growth trend ────────────────────────────────")
+                print(f"  Annual growth rate  : {annual_rate * 100:.3f}%")
+                print(f"  Monthly growth rate : {monthly_rate * 100:.4f}%")
+                print(f"  R² of log-linear fit: {r_value ** 2:.4f}")
+                print(f"  P-value             : {p_value:.4f}")
+                print(f"  Std error on slope  : {std_err:.6f}")
+
+                if r_value ** 2 < 0.85:
+                    print("  ⚠ Warning: R² < 0.85 — population trend is not consistently "
+                          "exponential. Saturation date uncertainty is higher.")
+                if p_value > 0.05:
+                    print("  ⚠ Warning: p-value > 0.05 — trend may not be statistically real.")
+
+                return monthly_rate, annual_rate, r_value ** 2, std_err, slope
+
+            # ═══════════════════════════════════════════════════════════════════════
+            # STEP 9 — SATURATION DATE FINDER
+            # Works for year-based and population-based, linear and tree models
+            # ═══════════════════════════════════════════════════════════════════════
+
+            def find_peak_month(best_pipeline, best_features, feature_set,
+                                is_log, smearing_factor, df):
+                """
+                Sweeps all 12 months at a reference predictor value and finds
+                which month produces the highest water demand prediction.
+                Works for any model type.
+                """
+                if feature_set == "year":
+                    ref_val = df["year"].median()
+                    pred_col = "year"
+                else:
+                    ref_val = df["log_population"].median() if is_log else df["population"].median()
+                    pred_col = "log_population" if is_log else "population"
+
+                monthly_preds = []
+                for m in range(1, 13):
+                    X_probe = pd.DataFrame([{
+                        pred_col: ref_val,
+                        "month_sin": np.sin(2 * np.pi * m / 12),
+                        "month_cos": np.cos(2 * np.pi * m / 12),
+                    }], columns=best_features)
+
+                    pred = best_pipeline.predict(X_probe)[0]
+                    if is_log:
+                        pred = np.exp(pred) * smearing_factor
+                    monthly_preds.append(pred)
+
+                return int(np.argmax(monthly_preds)) + 1
+
+            def find_saturation_year_based(best_pipeline, best_features, is_log,
+                                           smearing_factor, df,
+                                           total_stations_capacity, peak_month):
+                """
+                Year-based saturation: sweep future years until predicted demand
+                crosses capacity. Simple, no growth rate needed.
+                Returns optimistic/expected/pessimistic bounds by perturbing the
+                trend slightly — year ± 1 std of the year residuals.
+                """
+                current_year = int(df["year"].iloc[-1])
+
+                def predict_water(year):
+                    X_probe = pd.DataFrame([{
+                        "year": year,
+                        "month_sin": np.sin(2 * np.pi * peak_month / 12),
+                        "month_cos": np.cos(2 * np.pi * peak_month / 12),
+                    }], columns=best_features)
+                    pred = best_pipeline.predict(X_probe)[0]
+                    if is_log:
+                        pred = np.exp(pred) * smearing_factor
+                    return pred
+
+                for future_year in range(current_year, current_year + 100):
+                    if predict_water(future_year) >= total_stations_capacity:
+                        return future_year, peak_month
+
+                return None, None
+
+            def find_saturation_population_based(best_pipeline, best_features, is_log,
+                                                 smearing_factor, df,
+                                                 total_stations_capacity, peak_month,
+                                                 monthly_rate, slope_std_err):
+                """
+                Population-based saturation: use brentq to find the exact population
+                where predicted demand = capacity, then convert to a date using the
+                estimated growth rate.
+
+                Returns three scenarios (pessimistic / expected / optimistic) based
+                on ± 1 std error in the population growth slope.
+                """
+                pred_col = "log_population" if is_log else "population"
+                P0 = df["population"].iloc[-1]
+
+                def water_minus_capacity(population):
+                    pop_val = np.log(population) if is_log else population
+                    X_probe = pd.DataFrame([{
+                        pred_col: pop_val,
+                        "month_sin": np.sin(2 * np.pi * peak_month / 12),
+                        "month_cos": np.cos(2 * np.pi * peak_month / 12),
+                    }], columns=best_features)
+                    pred = best_pipeline.predict(X_probe)[0]
+                    if is_log:
+                        pred = np.exp(pred) * smearing_factor
+                    return pred - total_stations_capacity
+
+                # Check current population is below capacity
+                if water_minus_capacity(P0) > 0:
+                    print("⚠ Current population already exceeds capacity.")
+                    return None
+
+                # Dynamically expand upper bound until we bracket the root
+                P_high = P0 * 2
+                max_iter = 20
+                for _ in range(max_iter):
+                    if water_minus_capacity(P_high) > 0:
+                        break
+                    P_high *= 2
+                else:
+                    print("⚠ Capacity not reached within reasonable population range.")
+                    return None
+
+                pop_max = brentq(water_minus_capacity, P0, P_high, xtol=1.0)
+
+                # Convert pop_max to date under 3 growth rate scenarios
+                # slope_std_err propagates the uncertainty in the growth rate estimate
+                scenarios = {}
+                for label, rate_adj in [("pessimistic", -slope_std_err),
+                                        ("expected", 0),
+                                        ("optimistic", +slope_std_err)]:
+                    adj_annual_rate = np.exp(slope_std_err * rate_adj + np.log(1 + monthly_rate * 12)) - 1
+                    adj_monthly_rate = (1 + adj_annual_rate) ** (1 / 12) - 1
+
+                    if adj_monthly_rate <= 0:
+                        scenarios[label] = ("N/A", "N/A")
+                        continue
+
+                    months_diff = np.log(pop_max / P0) / np.log(1 + adj_monthly_rate)
+                    sat_year = int(df["year"].iloc[-1] + months_diff // 12)
+                    sat_month = int((months_diff % 12) + 1)
+                    scenarios[label] = (sat_year, sat_month)
+
+                return pop_max, scenarios
+
+            # ═══════════════════════════════════════════════════════════════════════
+            # STEP 10 — FEATURE IMPORTANCE (tree models only)
+            # Sanity check before trusting the model
+            # ═══════════════════════════════════════════════════════════════════════
+
+            def print_feature_importance(best_name, best_pipeline, best_features):
+                """
+                Prints feature importances for tree models.
+                If month_sin/cos ranks higher than your main predictor,
+                the model may be overfitting to seasonal noise — investigate.
+                """
+                if best_name not in TREE_MODELS:
+                    return
+
+                print(f"\n── Feature importance ({best_name}) ────────────────────────")
+                importances = best_pipeline.named_steps["model"].feature_importances_
+                for feat, imp in sorted(zip(best_features, importances), key=lambda x: -x[1]):
+                    bar = "█" * int(imp * 40)
+                    print(f"  {feat:<20} {imp:.4f}  {bar}")
+
+                main_predictor = best_features[0]
+                main_imp = dict(zip(best_features, importances))[main_predictor]
+                if main_imp < 0.4:
+                    print(f"\n  ⚠ Warning: {main_predictor} importance < 0.4 — "
+                          "seasonal features may be dominating. Check your data.")
+
+            # ═══════════════════════════════════════════════════════════════════════
+            # MAIN ENTRY POINT
+            # ═══════════════════════════════════════════════════════════════════════
+
+            def run_forecast(df, area_population, total_stations_capacity, area_name="Area"):
+                """
+                Full pipeline for one service area.
+
+                Parameters
+                ----------
+                df                     : DataFrame with columns [year, month, total_water, population]
+                area_population        : array/series of population values aligned to df rows
+                total_stations_capacity: float — combined capacity of all stations in this area
+                area_name              : str   — used in prints and plot titles
+
+                Returns
+                -------
+                dict with model name, CV scores, saturation date(s), and diagnostics
+                """
+
+                print(f"\n{'═' * 60}")
+                print(f"  WATER DEMAND FORECAST — {area_name}")
+                print(f"{'═' * 60}")
+
+                # ── 1. Attach population and validate ────────────────────────────
+                df = df.copy()
+                df["population"] = area_population
+                validate_inputs(df, total_stations_capacity)
+
+                # ── 2. Feature engineering ────────────────────────────────────────
+                df = engineer_features(df)
+
+                # ── 3. CV splitter — time-aware ───────────────────────────────────
+                # TimeSeriesSplit always trains on past, tests on future.
+                # n_splits=5 with gap=1 leaves one month between train and test
+                # to avoid leakage from autocorrelated consecutive months.
+                cv = TimeSeriesSplit(n_splits=5, gap=1)
+
+                # ── 4. Select feature set ─────────────────────────────────────────
+                feature_set = select_feature_set(df, cv)
+
+                # ── 5. Run model race ─────────────────────────────────────────────
+                results, best_name = run_model_race(df, feature_set, cv)
+                best_info = results[best_name]
+
+                # ── 6. Tune best model ────────────────────────────────────────────
+                best_pipeline = tune_best_model(best_name, best_info, df, cv)
+
+                # ── 7. Final evaluation ───────────────────────────────────────────
+                smearing_factor, final_r2, final_mae = evaluate_final_model(
+                    best_pipeline, best_info, df, area_name
+                )
+
+                # ── 8. Feature importance ─────────────────────────────────────────
+                print_feature_importance(best_name, best_pipeline, best_info["features"])
+
+                # ── 9. Saturation date ────────────────────────────────────────────
+                print(f"\n── Saturation analysis ({area_name}) ───────────────────────")
+
+                peak_month = find_peak_month(
+                    best_pipeline, best_info["features"], feature_set,
+                    best_info["is_log"], smearing_factor, df
+                )
+                print(f"  Peak demand month : {peak_month}")
+
+                sat_result = {}
+
+                if feature_set == "year":
+                    sat_year, sat_month = find_saturation_year_based(
+                        best_pipeline, best_info["features"], best_info["is_log"],
+                        smearing_factor, df, total_stations_capacity, peak_month
+                    )
+                    if sat_year:
+                        print(f"  Predicted saturation : {sat_year}/{sat_month:02d}")
+                        sat_result = {"year": sat_year, "month": sat_month}
+                    else:
+                        print("  Capacity not reached within 100 years under current trend.")
+
+                else:  # population-based
+                    monthly_rate, annual_rate, growth_r2, slope_std_err, _ = estimate_growth_rate(df)
+
+                    pop_result = find_saturation_population_based(
+                        best_pipeline, best_info["features"], best_info["is_log"],
+                        smearing_factor, df, total_stations_capacity, peak_month,
+                        monthly_rate, slope_std_err
+                    )
+
+                    if pop_result:
+                        pop_max, scenarios = pop_result
+                        print(f"  Saturation population : {int(pop_max):,}")
+                        print(f"  Saturation date scenarios:")
+                        for label, (y, m) in scenarios.items():
+                            if y != "N/A":
+                                print(f"    {label:<14} : {y}/{m:02d}")
+                            else:
+                                print(f"    {label:<14} : N/A")
+                        sat_result = {"pop_max": int(pop_max), "scenarios": scenarios}
+
+                # ── 10. Summary ───────────────────────────────────────────────────
+                print(f"\n── Summary ({area_name}) ────────────────────────────────────")
+                print(f"  Best model    : {best_name}")
+                print(f"  Feature set   : {feature_set}-based")
+                print(f"  CV R²         : {results[best_name]['mean_r2']:.4f} ± {results[best_name]['std_r2']:.4f}")
+                print(f"  Final R²      : {final_r2:.4f}")
+                print(f"  Final MAE     : {final_mae:.2f}")
+                print(f"{'═' * 60}\n")
+
+                return {
+                    "area": area_name,
+                    "best_model": best_name,
+                    "feature_set": feature_set,
+                    "cv_r2_mean": round(results[best_name]["mean_r2"], 4),
+                    "cv_r2_std": round(results[best_name]["std_r2"], 4),
+                    "final_r2": round(final_r2, 4),
+                    "final_mae": round(final_mae, 2),
+                    "peak_month": peak_month,
+                    "saturation": sat_result,
+                    "smearing_factor": smearing_factor,
+                    "pipeline": best_pipeline,
+                    "features": best_info["features"],
+                }
+
+            try:
+                forecast_result = run_forecast(
+                    df=df,
+                    area_population=area_population,
+                    total_stations_capacity=total_stations_capacity,
+                    area_name=f"Area_{area_id}"
+                )
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+
+                # ── Return result ─────────────────────────────────────────────
+            return jsonify({
+                "best_model": forecast_result["best_model"],
+                "feature_set": forecast_result["feature_set"],
+                "cv_r2_mean": forecast_result["cv_r2_mean"],
+                "cv_r2_std": forecast_result["cv_r2_std"],
+                "final_r2": forecast_result["final_r2"],
+                "final_mae": forecast_result["final_mae"],
+                "peak_month": forecast_result["peak_month"],
+                "saturation": forecast_result.get("saturation", {}),
+                "smearing_factor": forecast_result["smearing_factor"],
             })
-            print(coef_df)
-
-            # --- 8. Analytical Calculations (WITH Smearing Correction) ---
-
-            # 1️⃣ Seasonal peak month
-            beta_2 = model.coef_[features.index("month_sin")]
-            beta_3 = model.coef_[features.index("month_cos")]
-            month_angle = np.arctan2(beta_2, beta_3)
-            peak_month = ((month_angle / (2 * np.pi)) * 12) % 12
-            peak_month = int(np.round(peak_month)) + 1
-            print(f"Peak month: {peak_month}")
-
-            # 2️⃣ Solve for population at max water
-            # The corrected equation is: Water = Smear * exp(B0 + B1*ln(Pop) + Seasonal)
-            # Taking ln of both sides: ln(Water) = ln(Smear) + B0 + B1*ln(Pop) + Seasonal
-
-            target_water = total_stations_capacity
-            beta_0 = model.intercept_
-            beta_1 = model.coef_[features.index("log_population")]
-
-            seasonal_peak = beta_2 * np.sin(2 * np.pi * peak_month / 12) + beta_3 * np.cos(2 * np.pi * peak_month / 12)
-
-            # Check for optional year_index
-            year_term = 0
-            if "year_index" in features:
-                beta_4 = model.coef_[features.index("year_index")]
-                year_index_guess = 0
-                year_term = beta_4 * year_index_guess
-
-            # Isolate ln(Population) including the ln(Smear) correction term
-            log_pop_max = (np.log(target_water) - np.log(smearing_factor) - beta_0 - seasonal_peak - year_term) / beta_1
-            pop_max = np.exp(log_pop_max)
-
-            # 3️⃣ Convert population to year/month
-            P0 = df["population"].iloc[-1]  # Last known population
-            monthly_rate = ((P0 / df["population"].iloc[-2]) ** (1 / 12)) - 1
-
-            months_diff = np.log(pop_max / P0) / np.log(1 + monthly_rate)
-
-            year = int(df["year"].iloc[-1] + months_diff // 12)
-            month = int((months_diff % 12) + 1)
-
-            print("Max production occurs at population:", int(pop_max))
-            print("Predicted year/month:", year, month)
-
-            return jsonify({"response": "Done!"})
         else:
             financial_year_expr = case(
                 (TechnologyBill.bill_month >= 7, TechnologyBill.bill_year),
@@ -4443,6 +4957,7 @@ def balance_plot_calc(area_id, current_user):
             pd.set_option('display.max_columns', None)
             pd.options.display.float_format = '{:,.5f}'.format
             print(df.head())
+            import matplotlib.pyplot as plt
             fig, ax = plt.subplots(figsize=(12, 7))
 
             # --------------------
