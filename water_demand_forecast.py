@@ -1,20 +1,19 @@
 """
 Water Demand Forecasting Pipeline
 ──────────────────────────────────
-Combined model for all service areas with:
-- One-hot encoded area IDs
-- Total capacity as a feature
-- Time-sorted splits (every fold contains all areas)
-- AutoML model selection with cross-validation
-- Per-area saturation date estimation
-- Model persistence (joblib)
+Combined model for all service areas.
+Designed for time-based prediction — train on past, predict future.
+
+MINIMUM DATA REQUIREMENT:
+    12 months across all areas for reliable seasonal pattern.
+    24 months for reliable time trend + seasonality.
+    Current runs will warn if below these thresholds but still execute.
 """
 
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use("Agg")  # non-interactive backend — safe for Flask
-import matplotlib.pyplot as plt
+matplotlib.use("Agg")
 import warnings
 import joblib
 warnings.filterwarnings("ignore")
@@ -37,6 +36,10 @@ from sklearn.metrics         import r2_score, mean_absolute_error
 
 MODEL_PATH    = "water_model.pkl"
 METADATA_PATH = "water_model_meta.pkl"
+
+# Thresholds — model runs below these but warns about reliability
+MONTHS_FOR_SEASONALITY = 12   # need at least one full cycle
+MONTHS_FOR_TREND       = 24   # need two cycles for reliable trend
 
 LINEAR_MODELS = {"LinearRegression", "Ridge", "Lasso"}
 TREE_MODELS   = {"RandomForest", "GradientBoosting"}
@@ -66,53 +69,84 @@ PARAM_GRIDS = {
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# STEP 1 — VALIDATION
+# STEP 1 — DATA QUALITY REPORT
+# Warns about reliability without blocking execution
 # ═══════════════════════════════════════════════════════════════════════
 
-def validate_inputs(df):
+def data_quality_report(df):
     """
-    Validates the combined dataframe before any ML work.
-    df must have: year, month, total_water, population, area_id, total_capacity
-    Raises ValueError with a clear message on any failure.
+    Checks data sufficiency and prints a clear reliability warning.
+    Does NOT raise — the model still runs, but the caller knows
+    how much to trust the results.
+
+    Returns a dict of warning flags the frontend can display.
     """
     required_cols = ["year", "month", "total_water", "population",
                      "area_id", "total_capacity"]
 
+    # Hard failures — these break the model entirely
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
-        print(f"VALIDATION FAIL — missing columns: {missing}")
-        raise ValueError(f"Missing columns: {missing}")
+        raise ValueError(f"Missing required columns: {missing}")
 
     if (df["total_water"] <= 0).any():
-        print("VALIDATION FAIL — total_water has zeros or negatives")
-        print(df[df["total_water"] <= 0][["area_id", "year", "month", "total_water"]])
-        raise ValueError("total_water contains zeros or negatives")
+        bad = df[df["total_water"] <= 0][["area_id", "year", "month", "total_water"]]
+        raise ValueError(f"total_water has zeros or negatives:\n{bad}")
 
     if (df["population"] <= 0).any():
-        print("VALIDATION FAIL — population has zeros or negatives")
-        raise ValueError("population contains zeros or negatives")
+        raise ValueError("population has zeros or negatives")
 
     if (df["total_capacity"] <= 0).any():
-        print("VALIDATION FAIL — total_capacity has zeros or negatives")
-        raise ValueError("total_capacity contains zeros or negatives")
+        raise ValueError("total_capacity has zeros or negatives")
 
     if df[required_cols].isna().any().any():
-        print("VALIDATION FAIL — NaN values found")
-        print(df[required_cols].isna().sum())
-        raise ValueError("NaN values found in required columns")
+        raise ValueError(f"NaN values:\n{df[required_cols].isna().sum()}")
 
-    total_rows = len(df)
-    n_areas    = df["area_id"].nunique()
+    # Soft warnings — model runs but results less reliable
+    warnings_list = []
+    total_rows    = len(df)
+    n_areas       = df["area_id"].nunique()
+    n_months      = df.groupby(["year", "month"]).ngroups  # unique time slices
 
-    if total_rows < 24:
-        print(f"VALIDATION FAIL — only {total_rows} rows across {n_areas} areas, "
-              f"need at least 24")
-        raise ValueError(
-            f"Only {total_rows} rows across {n_areas} areas — "
-            f"need at least 24 total for meaningful cross-validation."
-        )
+    print(f"\n── Data quality report ─────────────────────────────────────")
+    print(f"  Total rows     : {total_rows}")
+    print(f"  Areas          : {n_areas}")
+    print(f"  Unique months  : {n_months}")
 
-    print(f"✓ Input validation passed — {total_rows} rows, {n_areas} areas")
+    if n_months < MONTHS_FOR_SEASONALITY:
+        msg = (f"Only {n_months} months of data — seasonal pattern unreliable. "
+               f"Need {MONTHS_FOR_SEASONALITY} for one full cycle.")
+        print(f"  ⚠ WARNING: {msg}")
+        warnings_list.append({"code": "insufficient_seasonality", "message": msg})
+
+    elif n_months < MONTHS_FOR_TREND:
+        msg = (f"{n_months} months of data — seasonal pattern visible but "
+               f"time trend is weak. Need {MONTHS_FOR_TREND} for reliable trend.")
+        print(f"  ⚠ WARNING: {msg}")
+        warnings_list.append({"code": "weak_trend", "message": msg})
+
+    else:
+        print(f"  ✓ Sufficient data for reliable forecasting")
+
+    # Check area coverage — are all areas present in all months?
+    month_area_coverage = df.groupby(["year", "month"])["area_id"].nunique()
+    min_coverage = month_area_coverage.min()
+    if min_coverage < n_areas:
+        msg = (f"Some months have incomplete area coverage "
+               f"(min {min_coverage}/{n_areas} areas in one month).")
+        print(f"  ⚠ WARNING: {msg}")
+        warnings_list.append({"code": "incomplete_coverage", "message": msg})
+
+    if not warnings_list:
+        print(f"  ✓ No data quality issues found")
+
+    return {
+        "total_rows":   total_rows,
+        "n_areas":      n_areas,
+        "n_months":     n_months,
+        "warnings":     warnings_list,
+        "reliable":     n_months >= MONTHS_FOR_TREND,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -121,22 +155,13 @@ def validate_inputs(df):
 
 def engineer_features(df):
     """
-    Adds all derived columns and one-hot encodes area_id.
+    Adds derived columns and one-hot encodes area_id.
 
-    Sorting by [year, month, area_id] is critical — it ensures every
-    time slice groups together so train/test splits cut across TIME,
-    not across areas. This means every fold sees all areas.
-
-    One-hot encoding:
-        area_id_3, area_id_5 ... one column per area except the first
-        (drop_first=True removes the reference area to avoid
-        multicollinearity — having N-1 dummies fully represents N areas)
+    Sorting by [year, month, area_id] ensures every time slice
+    groups together — TimeSeriesSplit then cuts across time,
+    not across areas. Every fold sees all areas.
     """
     df = df.copy()
-
-    # Sort by TIME first — this is the key fix for correct CV splits
-    # Each time slice (Jul 2025, Aug 2025 ...) has one row per area
-    # so splitting by row index = splitting by time period
     df = df.sort_values(["year", "month", "area_id"]).reset_index(drop=True)
 
     df["month_sin"]      = np.sin(2 * np.pi * df["month"] / 12)
@@ -145,27 +170,24 @@ def engineer_features(df):
     df["log_water"]      = np.log(df["total_water"])
     df["log_capacity"]   = np.log(df["total_capacity"])
 
-    # One-hot encode area_id — converts categorical area IDs into
-    # binary columns the model can use without implying numeric ordering
+    # One-hot encode area_id
+    # drop_first=True: N-1 dummies fully represent N areas,
+    # avoids multicollinearity with the intercept
     df = pd.get_dummies(df, columns=["area_id"], drop_first=True)
 
     return df
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# STEP 3 — VALIDATE CV FOLDS
-# Confirms every fold contains multiple areas before training starts
+# STEP 3 — CV FOLD VALIDATION
 # ═══════════════════════════════════════════════════════════════════════
 
 def validate_cv_folds(df, cv, features):
     """
-    Prints area count per fold. After the time-sort fix you should see
-    all 26 areas in every train and test fold.
-
-    If test areas < total areas, the sort didn't work as expected
-    or data is missing for some areas in certain months.
+    Confirms every fold contains multiple areas.
+    After time-sort, each fold should have all areas in both
+    train and test sets.
     """
-    # Recover area_id from one-hot columns for counting
     area_dummy_cols = [c for c in df.columns if c.startswith("area_id_")]
 
     print(f"\n── CV fold validation ──────────────────────────────────────")
@@ -173,35 +195,25 @@ def validate_cv_folds(df, cv, features):
           f"{'Test rows':>10} {'Test areas':>11}")
     print("  " + "─" * 55)
 
-    for fold_idx, (train_idx, test_idx) in enumerate(cv.split(df[features])):
-        # Count distinct areas by checking which dummy cols are 1
-        # (reference area = row where all dummies are 0)
-        train_df    = df.iloc[train_idx]
-        test_df     = df.iloc[test_idx]
+    for i, (train_idx, test_idx) in enumerate(cv.split(df[features])):
+        train_df = df.iloc[train_idx]
+        test_df  = df.iloc[test_idx]
 
-        # Each row is one area-month — just count unique row groups
-        # approximated by row count / months in fold
-        train_rows  = len(train_idx)
-        test_rows   = len(test_idx)
-
-        # Estimate areas: if data is balanced, rows / months = areas
-        # Use dummy columns to count actual unique area combinations
         if area_dummy_cols:
-            train_area_count = len(train_df[area_dummy_cols].drop_duplicates())
-            test_area_count  = len(test_df[area_dummy_cols].drop_duplicates())
+            n_train_areas = len(train_df[area_dummy_cols].drop_duplicates())
+            n_test_areas  = len(test_df[area_dummy_cols].drop_duplicates())
         else:
-            train_area_count = "?"
-            test_area_count  = "?"
+            n_train_areas = n_test_areas = "?"
 
-        print(f"  Fold {fold_idx + 1:<2}  "
-              f"{train_rows:>10}   "
-              f"{str(train_area_count):>11}   "
-              f"{test_rows:>9}   "
-              f"{str(test_area_count):>10}")
+        print(f"  Fold {i + 1:<2}  "
+              f"{len(train_idx):>10}   "
+              f"{str(n_train_areas):>11}   "
+              f"{len(test_idx):>9}   "
+              f"{str(n_test_areas):>10}")
 
-        if isinstance(test_area_count, int) and test_area_count < 2:
-            print(f"  ⚠ WARNING fold {fold_idx + 1}: test set has < 2 areas — "
-                  f"check data completeness across months")
+        if isinstance(n_test_areas, int) and n_test_areas < 2:
+            print(f"  ⚠ Fold {i + 1}: test set has < 2 areas — "
+                  f"consider reducing n_splits")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -210,41 +222,42 @@ def validate_cv_folds(df, cv, features):
 
 def select_feature_set(df, cv):
     """
-    Compares year-based vs population-based features using LinearRegression
-    as a neutral referee. Capacity and area dummies included in both.
+    Compares year-based vs population-based features using
+    LinearRegression as a neutral referee.
+    Ties go to year — simpler extrapolation, no growth rate needed.
     """
     print("\n── Feature set selection ──────────────────────────────────")
 
     corr          = df[["year", "population", "log_population", "log_water"]].corr()
     year_pop_corr = abs(corr.loc["year", "population"])
-    print(f"year ↔ population correlation : {year_pop_corr:.3f}")
+    print(f"  year ↔ population correlation : {year_pop_corr:.3f}")
     if year_pop_corr > 0.90:
         print("  → High collinearity confirmed — correct to use only one.")
 
     area_dummy_cols = [c for c in df.columns if c.startswith("area_id_")]
 
-    feature_sets = {
+    candidates = {
         "year":       ["year",           "month_sin", "month_cos",
                        "log_capacity"]   + area_dummy_cols,
         "population": ["log_population", "month_sin", "month_cos",
                        "log_capacity"]   + area_dummy_cols,
     }
 
-    scores_summary = {}
-    for label, feats in feature_sets.items():
+    scores = {}
+    for label, feats in candidates.items():
         pipe   = Pipeline([("scaler", StandardScaler()),
                            ("model",  LinearRegression())])
-        scores = cross_val_score(pipe, df[feats], df["log_water"],
+        s      = cross_val_score(pipe, df[feats], df["log_water"],
                                  cv=cv, scoring="r2")
-        scores_summary[label] = scores.mean()
-        print(f"\n  {label}-based  →  CV R² = {scores.mean():.4f} ± {scores.std():.4f}")
+        scores[label] = s.mean()
+        print(f"\n  {label}-based  →  CV R² = {s.mean():.4f} ± {s.std():.4f}")
 
-    winner = max(scores_summary, key=scores_summary.get)
-    margin = abs(scores_summary["year"] - scores_summary["population"])
+    winner = max(scores, key=scores.get)
+    margin = abs(scores["year"] - scores["population"])
 
-    print(f"\n✓ Selected feature set : {winner}-based", end="")
+    print(f"\n✓ Selected : {winner}-based", end="")
     if margin < 0.02:
-        print(f"  (margin only {margin:.4f} — year preferred for simpler extrapolation)")
+        print(f"  (margin {margin:.4f} — year preferred for simpler extrapolation)")
         winner = "year"
     else:
         print(f"  (margin = {margin:.4f})")
@@ -258,16 +271,10 @@ def select_feature_set(df, cv):
 
 def make_pipeline(name, model, feature_set, df):
     """
-    Builds (pipeline, features, target, is_log) for each model type.
-
-    Feature sets:
-        Linear models → log_capacity + log_population or year + area dummies
-        Tree models   → total_capacity + population or year + area dummies
-        SVR           → same as tree but with StandardScaler
-
-    Why different capacity columns?
-        Linear models need log_capacity because the relationship is
-        multiplicative. Tree models find the right split regardless of scale.
+    Each model type gets the right preprocessing:
+        Linear → StandardScaler + log-space features + log target
+        Tree   → no scaler (scale-invariant) + raw features + raw target
+        SVR    → StandardScaler + raw features + raw target
     """
     area_dummy_cols = [c for c in df.columns if c.startswith("area_id_")]
 
@@ -283,24 +290,16 @@ def make_pipeline(name, model, feature_set, df):
                              "total_capacity"] + area_dummy_cols)
 
     if name in LINEAR_MODELS:
-        pipe     = Pipeline([("scaler", StandardScaler()), ("model", model)])
-        features = features_linear
-        target   = df["log_water"]
-        is_log   = True
+        return (Pipeline([("scaler", StandardScaler()), ("model", model)]),
+                features_linear, df["log_water"], True)
 
     elif name in TREE_MODELS:
-        pipe     = Pipeline([("model", model)])
-        features = features_tree
-        target   = df["total_water"]
-        is_log   = False
+        return (Pipeline([("model", model)]),
+                features_tree, df["total_water"], False)
 
     else:  # SVR
-        pipe     = Pipeline([("scaler", StandardScaler()), ("model", model)])
-        features = features_tree
-        target   = df["total_water"]
-        is_log   = False
-
-    return pipe, features, target, is_log
+        return (Pipeline([("scaler", StandardScaler()), ("model", model)]),
+                features_tree, df["total_water"], False)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -308,13 +307,9 @@ def make_pipeline(name, model, feature_set, df):
 # ═══════════════════════════════════════════════════════════════════════
 
 def run_model_race(df, feature_set, cv):
-    """
-    Runs cross-validation for every candidate model.
-    Data is already time-sorted so CV folds are time-aware.
-    """
     print("\n── Model race ─────────────────────────────────────────────")
-    print(f"  {'Model':<22} {'Mean R²':>8} {'Std R²':>8} {'Features':>12}")
-    print("  " + "─" * 55)
+    print(f"  {'Model':<22} {'Mean R²':>8} {'Std R²':>8} {'Space':>8}")
+    print("  " + "─" * 52)
 
     results = {}
     for name, model in CANDIDATE_MODELS.items():
@@ -330,11 +325,11 @@ def run_model_race(df, feature_set, cv):
             "std_r2":   scores.std(),
         }
 
-        feat_label = "log" if is_log else "raw"
-        print(f"  {name:<22} {scores.mean():>8.4f} {scores.std():>8.4f} {feat_label:>12}")
+        print(f"  {name:<22} {scores.mean():>8.4f} {scores.std():>8.4f} "
+              f"{'log' if is_log else 'raw':>8}")
 
     best_name = max(results, key=lambda k: results[k]["mean_r2"])
-    print(f"\n✓ Best model (pre-tuning): {best_name}  "
+    print(f"\n✓ Best model: {best_name}  "
           f"R²={results[best_name]['mean_r2']:.4f} ± {results[best_name]['std_r2']:.4f}")
 
     return results, best_name
@@ -345,28 +340,19 @@ def run_model_race(df, feature_set, cv):
 # ═══════════════════════════════════════════════════════════════════════
 
 def tune_best_model(best_name, best_info, df, cv):
-    """
-    Tunes only the winning model — no wasted computation on losers.
-    LinearRegression has no hyperparameters so it's skipped.
-    """
     if best_name not in PARAM_GRIDS:
-        print(f"\n── Tuning: {best_name} has no hyperparameters to tune — skipping")
+        print(f"\n── Tuning: {best_name} has no hyperparameters — skipping")
         return best_info["pipeline"]
 
     print(f"\n── Tuning {best_name} ──────────────────────────────────────")
-    grid_search = GridSearchCV(
-        best_info["pipeline"],
-        PARAM_GRIDS[best_name],
-        cv=cv, scoring="r2",
-        n_jobs=-1, refit=True
-    )
-    grid_search.fit(df[best_info["features"]], best_info["target"])
+    gs = GridSearchCV(best_info["pipeline"], PARAM_GRIDS[best_name],
+                      cv=cv, scoring="r2", n_jobs=-1, refit=True)
+    gs.fit(df[best_info["features"]], best_info["target"])
 
-    print(f"  Best params : {grid_search.best_params_}")
-    print(f"  Tuned R²    : {grid_search.best_score_:.4f}  "
-          f"(was {best_info['mean_r2']:.4f})")
+    print(f"  Best params : {gs.best_params_}")
+    print(f"  Tuned R²    : {gs.best_score_:.4f}  (was {best_info['mean_r2']:.4f})")
 
-    return grid_search.best_estimator_
+    return gs.best_estimator_
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -375,38 +361,26 @@ def tune_best_model(best_name, best_info, df, cv):
 
 def evaluate_final_model(best_pipeline, best_info, df):
     """
-    80/20 time-ordered split across the combined dataset.
-
-    Because df is sorted by [year, month, area_id], the split cuts
-    across time — train = early months of ALL areas,
-    test = later months of ALL areas.
-
-    This correctly simulates deployment: the model has seen all areas
-    and is tested on whether it can predict their FUTURE demand.
+    80/20 time-ordered holdout.
+    df sorted by [year, month, area_id] so split cuts across time —
+    train = early months ALL areas, test = recent months ALL areas.
     """
     features  = best_info["features"]
     is_log    = best_info["is_log"]
     split_idx = int(len(df) * 0.8)
 
+    area_dummies     = [c for c in features if c.startswith("area_id_")]
+    n_train_areas    = (len(df.iloc[:split_idx][area_dummies].drop_duplicates())
+                        if area_dummies else "?")
+    n_test_areas     = (len(df.iloc[split_idx:][area_dummies].drop_duplicates())
+                        if area_dummies else "?")
+
+    print(f"\n── Final evaluation ────────────────────────────────────────")
+    print(f"  Train : {split_idx} rows / {n_train_areas} areas  (early months)")
+    print(f"  Test  : {len(df) - split_idx} rows / {n_test_areas} areas  (recent months)")
+
     X_train = df[features].iloc[:split_idx]
     X_test  = df[features].iloc[split_idx:]
-
-    # Recover area_id counts for verification
-    area_dummy_cols      = [c for c in features if c.startswith("area_id_")]
-    train_area_count     = (len(df.iloc[:split_idx][area_dummy_cols].drop_duplicates())
-                            if area_dummy_cols else "?")
-    test_area_count      = (len(df.iloc[split_idx:][area_dummy_cols].drop_duplicates())
-                            if area_dummy_cols else "?")
-
-    print(f"\n── Final evaluation (combined model) ──────────────────────")
-    print(f"  Train : {split_idx} rows / {train_area_count} areas"
-          f"  (months up to split)")
-    print(f"  Test  : {len(df) - split_idx} rows / {test_area_count} areas"
-          f"  (most recent months)")
-
-    if isinstance(test_area_count, int) and test_area_count < 2:
-        print("  ⚠ WARNING: test set has fewer than 2 areas — "
-              "data may not be balanced across months")
 
     if is_log:
         y_train         = df["log_water"].iloc[:split_idx]
@@ -417,11 +391,8 @@ def evaluate_final_model(best_pipeline, best_info, df):
 
     best_pipeline.fit(X_train, y_train)
 
-    # Smearing factor corrects the bias introduced by log → exp inversion
-    # For raw-target models it stays 1.0 (no correction needed)
     if is_log:
-        train_preds     = best_pipeline.predict(X_train)
-        residuals       = y_train - train_preds
+        residuals       = y_train - best_pipeline.predict(X_train)
         smearing_factor = np.mean(np.exp(residuals))
         y_pred          = np.exp(best_pipeline.predict(X_test)) * smearing_factor
     else:
@@ -431,210 +402,363 @@ def evaluate_final_model(best_pipeline, best_info, df):
     r2  = r2_score(y_test_original, y_pred)
     mae = mean_absolute_error(y_test_original, y_pred)
 
-    print(f"  R²  (original scale) : {r2:.4f}")
-    print(f"  MAE (original scale) : {mae:.2f}")
-    print(f"  Smearing factor      : {smearing_factor:.4f}")
+    print(f"  R²  : {r2:.4f}  (NOTE: measures cross-area variance, not trend accuracy)")
+    print(f"  MAE : {mae:.2f}")
+    print(f"  Smearing factor : {smearing_factor:.4f}")
 
     return smearing_factor, r2, mae
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# STEP 9 — POPULATION GROWTH RATE
-# Used only when feature_set == "population"
+# STEP 9 — MEANINGFUL METRICS
+# R² alone is misleading — these three directly test saturation reliability
 # ═══════════════════════════════════════════════════════════════════════
 
-def estimate_growth_rate(area_df):
+def build_probe_row(area_id, predictor_val, month, capacity,
+                    feature_set, is_log, all_area_ids, features):
     """
-    Fits log-linear trend over all available years for one area.
-    Uses yearly averages to reduce monthly noise.
-    Returns monthly_rate and std_err for uncertainty propagation.
-    """
-    yearly  = area_df.groupby("year")["population"].mean().reset_index()
-    years   = yearly["year"].values.astype(float)
-    log_pop = np.log(yearly["population"].values)
-
-    if len(years) < 2:
-        print("  ⚠ Only one year of data — assuming zero growth")
-        return 0.0, 0.0, 0.0, 0.0, 0.0
-
-    slope, intercept, r_value, p_value, std_err = linregress(years, log_pop)
-
-    annual_rate  = np.exp(slope) - 1
-    monthly_rate = (1 + annual_rate) ** (1 / 12) - 1
-
-    print(f"  Annual growth rate   : {annual_rate * 100:.3f}%")
-    print(f"  R² of log-linear fit : {r_value ** 2:.4f}")
-
-    if r_value ** 2 < 0.85:
-        print("  ⚠ R² < 0.85 — population trend not consistently exponential")
-    if p_value > 0.05:
-        print("  ⚠ p-value > 0.05 — trend may not be statistically real")
-
-    return monthly_rate, annual_rate, r_value ** 2, std_err, slope
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# STEP 10 — SATURATION DATE FINDER
-# ═══════════════════════════════════════════════════════════════════════
-
-def build_probe_row(area_id, predictor_val, peak_month,
-                    capacity, feature_set, is_log,
-                    all_area_ids, features):
-    """
-    Builds a single-row DataFrame for prediction for a specific area.
-
-    One-hot dummy columns are set correctly:
-        - reference area (first sorted ID): all dummies = 0
-        - any other area: its dummy column = 1, all others = 0
-
-    capacity is log-transformed for linear models, raw for tree models.
+    Builds a single-row DataFrame for one area at one point in time.
+    Sets one-hot dummies correctly for the given area.
     """
     sorted_ids   = sorted(all_area_ids)
     reference_id = sorted_ids[0]
     cap_val      = np.log(capacity) if is_log else capacity
 
-    # Base row
     if feature_set == "year":
         row = {
             "year":      predictor_val,
-            "month_sin": np.sin(2 * np.pi * peak_month / 12),
-            "month_cos": np.cos(2 * np.pi * peak_month / 12),
+            "month_sin": np.sin(2 * np.pi * month / 12),
+            "month_cos": np.cos(2 * np.pi * month / 12),
             "log_capacity" if is_log else "total_capacity": cap_val,
         }
     else:
         pred_col = "log_population" if is_log else "population"
         row = {
             pred_col:    predictor_val,
-            "month_sin": np.sin(2 * np.pi * peak_month / 12),
-            "month_cos": np.cos(2 * np.pi * peak_month / 12),
+            "month_sin": np.sin(2 * np.pi * month / 12),
+            "month_cos": np.cos(2 * np.pi * month / 12),
             "log_capacity" if is_log else "total_capacity": cap_val,
         }
 
-    # Set all area dummies to 0
     for aid in sorted_ids[1:]:
         row[f"area_id_{aid}"] = 0
 
-    # Set this area's dummy to 1 (unless it's the reference area)
     if area_id != reference_id:
-        col_name = f"area_id_{area_id}"
-        if col_name in features:
-            row[col_name] = 1
+        col = f"area_id_{area_id}"
+        if col in features:
+            row[col] = 1
 
     return pd.DataFrame([row], columns=features)
 
 
-def find_peak_month(best_pipeline, features, feature_set,
-                    is_log, smearing_factor,
-                    area_id, area_df, capacity, all_area_ids):
-    """
-    Sweeps all 12 months at a reference predictor value and returns
-    which month produces the highest predicted demand for this area.
-    """
-    if feature_set == "year":
-        ref_val = float(area_df["year"].median())
-    else:
-        ref_val = (area_df["log_population"].median() if is_log
-                   else area_df["population"].median())
+def predict_for_row(best_pipeline, features, feature_set, is_log,
+                    smearing_factor, area_id, row, capacity, all_area_ids):
+    """Predicts water production for one row."""
+    val = (float(row["year"]) if feature_set == "year"
+           else (np.log(row["population"]) if is_log
+                 else row["population"]))
+    X   = build_probe_row(area_id, val, int(row["month"]),
+                          capacity, feature_set, is_log,
+                          all_area_ids, features)
+    p   = best_pipeline.predict(X)[0]
+    return np.exp(p) * smearing_factor if is_log else p
 
-    monthly_preds = []
-    for m in range(1, 13):
-        X_probe = build_probe_row(
-            area_id, ref_val, m, capacity,
-            feature_set, is_log, all_area_ids, features
-        )
-        pred = best_pipeline.predict(X_probe)[0]
+
+def evaluate_trend_accuracy(best_pipeline, best_info, original_df,
+                             all_area_ids, smearing_factor,
+                             feature_set, area_names):
+    """
+    Checks predicted trend direction vs actual for each area.
+    Target > 80% correct — below this, saturation dates are unreliable.
+    """
+    print("\n── Trend direction accuracy ────────────────────────────────")
+    print(f"  {'Area':<40} {'Actual':>11} {'Predicted':>10} {'Match':>6}")
+    print("  " + "─" * 72)
+
+    correct = 0
+    total   = 0
+
+    for area_id in all_area_ids:
+        area_df   = (original_df[original_df["area_id"] == area_id]
+                     .sort_values(["year", "month"])
+                     .reset_index(drop=True))
+        area_name = area_names.get(area_id, str(area_id))
+        capacity  = area_df["total_capacity"].iloc[0]
+
+        if len(area_df) < 2:
+            continue
+
+        slope, _, _, p_val, _ = linregress(range(len(area_df)),
+                                           area_df["total_water"].values)
+        actual_dir = "↑ growing" if slope > 0 else "↓ shrinking"
+
+        pred_first = predict_for_row(best_pipeline, best_info["features"],
+                                     feature_set, best_info["is_log"],
+                                     smearing_factor, area_id,
+                                     area_df.iloc[0], capacity, all_area_ids)
+        pred_last  = predict_for_row(best_pipeline, best_info["features"],
+                                     feature_set, best_info["is_log"],
+                                     smearing_factor, area_id,
+                                     area_df.iloc[-1], capacity, all_area_ids)
+        pred_dir   = "↑ growing" if pred_last > pred_first else "↓ shrinking"
+
+        match    = "✓" if actual_dir == pred_dir else "✗"
+        correct += 1 if match == "✓" else 0
+        total   += 1
+        sig      = "" if p_val < 0.05 else " (weak)"
+        print(f"  {area_name:<40} {actual_dir:>11} {pred_dir:>10} {match:>6}{sig}")
+
+    accuracy = correct / total if total > 0 else 0
+    print(f"\n  Result : {correct}/{total} = {accuracy:.1%}  "
+          f"({'✓ reliable' if accuracy >= 0.8 else '✗ saturation dates unreliable — need more data'})")
+    return accuracy
+
+
+def evaluate_utilization_accuracy(best_pipeline, best_info, original_df,
+                                   all_area_ids, smearing_factor,
+                                   feature_set, area_names):
+    """
+    Compares predicted vs actual utilization (water/capacity) per area.
+    Scale-independent — errors are relative to each area's own capacity.
+    Target < 10%.
+    """
+    print("\n── Per-area utilization accuracy ───────────────────────────")
+    print(f"  {'Area':<40} {'Actual':>10} {'Predicted':>10} {'Error':>8}")
+    print("  " + "─" * 72)
+
+    errors = []
+    for area_id in all_area_ids:
+        area_df   = original_df[original_df["area_id"] == area_id].copy()
+        area_name = area_names.get(area_id, str(area_id))
+        capacity  = area_df["total_capacity"].iloc[0]
+
+        preds = [predict_for_row(best_pipeline, best_info["features"],
+                                 feature_set, best_info["is_log"],
+                                 smearing_factor, area_id, row,
+                                 capacity, all_area_ids)
+                 for _, row in area_df.iterrows()]
+
+        actual_util = area_df["total_water"].mean() / capacity
+        pred_util   = np.mean(preds) / capacity
+        error       = abs(actual_util - pred_util)
+        errors.append(error)
+
+        flag = " ⚠" if error > 0.15 else ""
+        print(f"  {area_name:<40} {actual_util:>9.1%} {pred_util:>9.1%} "
+              f"{error:>7.1%}{flag}")
+
+    mean_err = np.mean(errors)
+    print(f"\n  Result : {mean_err:.1%}  "
+          f"({'✓ reliable' if mean_err <= 0.10 else '✗ predictions too far from actual — need more data'})")
+    return mean_err
+
+
+def evaluate_mape(best_pipeline, best_info, original_df,
+                  all_area_ids, smearing_factor,
+                  feature_set, area_names):
+    """
+    Holds out last observed month per area, tests prediction accuracy.
+    Directly answers: can the model predict next month for this area?
+    Target MAPE < 15%.
+    """
+    print("\n── Last-month holdout MAPE ─────────────────────────────────")
+    print(f"  {'Area':<40} {'Actual':>12} {'Predicted':>12} {'Error%':>8}")
+    print("  " + "─" * 76)
+
+    actuals = []
+    preds   = []
+
+    for area_id in all_area_ids:
+        area_df   = (original_df[original_df["area_id"] == area_id]
+                     .sort_values(["year", "month"])
+                     .reset_index(drop=True))
+        area_name = area_names.get(area_id, str(area_id))
+        capacity  = area_df["total_capacity"].iloc[0]
+
+        if len(area_df) < 3:
+            print(f"  {area_name:<40} — skipped (< 3 rows)")
+            continue
+
+        last_row  = area_df.iloc[-1]
+        pred      = predict_for_row(best_pipeline, best_info["features"],
+                                    feature_set, best_info["is_log"],
+                                    smearing_factor, area_id,
+                                    last_row, capacity, all_area_ids)
+        actual    = last_row["total_water"]
+        pct_err   = abs(pred - actual) / actual * 100
+
+        actuals.append(actual)
+        preds.append(pred)
+
+        flag = " ⚠" if pct_err > 20 else ""
+        print(f"  {area_name:<40} {actual:>12,.0f} {pred:>12,.0f} "
+              f"{pct_err:>7.1f}%{flag}")
+
+    if not actuals:
+        return 0.0
+
+    mape = np.mean([abs(p - a) / a * 100 for p, a in zip(preds, actuals)])
+    print(f"\n  Result : MAPE = {mape:.1f}%  "
+          f"({'✓ reliable' if mape <= 15 else '✗ next-month predictions inaccurate — need more data'})")
+    return mape
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# STEP 10 — FEATURE IMPORTANCE
+# ═══════════════════════════════════════════════════════════════════════
+
+def print_feature_importance(best_name, best_pipeline, features):
+    if best_name not in TREE_MODELS:
+        return
+
+    print(f"\n── Feature importance ({best_name}) ────────────────────────")
+    importances = best_pipeline.named_steps["model"].feature_importances_
+    for feat, imp in sorted(zip(features, importances), key=lambda x: -x[1]):
+        print(f"  {feat:<30} {imp:.4f}  {'█' * int(imp * 40)}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# STEP 11 — POPULATION GROWTH RATE
+# ═══════════════════════════════════════════════════════════════════════
+
+def estimate_growth_rate(area_df):
+    """Log-linear fit over all available years. Returns monthly rate."""
+    yearly  = area_df.groupby("year")["population"].mean().reset_index()
+    years   = yearly["year"].values.astype(float)
+    log_pop = np.log(yearly["population"].values)
+
+    if len(years) < 2:
+        print("  ⚠ Only one year — assuming zero growth")
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+
+    slope, _, r_value, p_value, std_err = linregress(years, log_pop)
+    annual_rate  = np.exp(slope) - 1
+    monthly_rate = (1 + annual_rate) ** (1 / 12) - 1
+
+    print(f"  Annual growth : {annual_rate * 100:.3f}%  "
+          f"R²={r_value**2:.4f}  p={p_value:.4f}")
+
+    if r_value ** 2 < 0.85:
+        print("  ⚠ R² < 0.85 — population trend unreliable")
+
+    return monthly_rate, annual_rate, r_value ** 2, std_err, slope
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# STEP 12 — SATURATION DATE FINDER
+# ═══════════════════════════════════════════════════════════════════════
+
+def find_peak_month(best_pipeline, features, feature_set, is_log,
+                    smearing_factor, area_id, area_df,
+                    capacity, all_area_ids):
+    """
+    Sweeps only observed months — never extrapolates to unseen months.
+    Prevents the model from picking an unseen month as peak.
+    """
+    ref_val = (float(area_df["year"].median()) if feature_set == "year"
+               else (area_df["log_population"].median() if is_log
+                     else area_df["population"].median()))
+
+    observed_months = sorted(area_df["month"].unique().tolist())
+    monthly_preds   = []
+
+    for m in observed_months:
+        X    = build_probe_row(area_id, ref_val, m, capacity,
+                               feature_set, is_log, all_area_ids, features)
+        pred = best_pipeline.predict(X)[0]
         if is_log:
             pred = np.exp(pred) * smearing_factor
-        monthly_preds.append(pred)
+        monthly_preds.append((m, pred))
 
-    return int(np.argmax(monthly_preds)) + 1
+    return max(monthly_preds, key=lambda x: x[1])[0]
 
 
 def find_saturation_for_area(best_pipeline, features, feature_set,
                               is_log, smearing_factor,
-                              area_id, area_df, capacity, all_area_ids):
+                              area_id, area_df, capacity,
+                              all_area_ids, area_name):
     """
-    Finds saturation date for one area using the combined model.
-    Each area uses its own capacity as the threshold.
-
-    Year-based  → sweeps future years until demand >= capacity
-    Pop-based   → uses brentq to find the exact population at capacity,
-                  then converts to date using growth rate
+    Finds saturation date for one area.
+    Shows current utilization before predicting.
+    Year-based: sweeps future years.
+    Population-based: brentq root finding + 3 growth scenarios.
     """
-    print(f"\n  ── Area {area_id} ──────────────────────────────────────")
+    print(f"\n  ── {area_name} (id={area_id})")
 
-    peak_month = find_peak_month(
-        best_pipeline, features, feature_set, is_log,
-        smearing_factor, area_id, area_df, capacity, all_area_ids
-    )
-    print(f"  Peak demand month : {peak_month}")
+    max_obs     = area_df["total_water"].max()
+    utilization = max_obs / capacity
+    util_str    = f"{utilization:.1%}"
+
+    flag = (" ⚠ EXCEEDING" if utilization >= 1.0
+            else " ⚠ CRITICAL" if utilization >= 0.9
+            else " ⚠ WARNING"  if utilization >= 0.75
+            else "")
+
+    print(f"  Utilization : {util_str}{flag}  "
+          f"({max_obs:,.0f} / {capacity:,.0f})")
+
+    peak_month = find_peak_month(best_pipeline, features, feature_set,
+                                 is_log, smearing_factor, area_id,
+                                 area_df, capacity, all_area_ids)
+    print(f"  Peak month  : {peak_month}")
+
+    base_result = {
+        "area_name":   area_name,
+        "peak_month":  peak_month,
+        "utilization": round(utilization, 4),
+    }
 
     # ── Year-based ────────────────────────────────────────────────────
     if feature_set == "year":
-        current_year    = int(area_df["year"].max())
-        sat_year, sat_month = None, None
+        current_year = int(area_df["year"].max())
 
         for future_year in range(current_year, current_year + 100):
-            X_probe = build_probe_row(
-                area_id, future_year, peak_month, capacity,
-                feature_set, is_log, all_area_ids, features
-            )
-            pred = best_pipeline.predict(X_probe)[0]
+            X    = build_probe_row(area_id, future_year, peak_month, capacity,
+                                   feature_set, is_log, all_area_ids, features)
+            pred = best_pipeline.predict(X)[0]
             if is_log:
                 pred = np.exp(pred) * smearing_factor
 
             if pred >= capacity:
-                sat_year, sat_month = future_year, peak_month
-                break
+                print(f"  Saturation  : {future_year}/{peak_month:02d}")
+                return {**base_result, "year": future_year, "month": peak_month}
 
-        if sat_year:
-            print(f"  Predicted saturation : {sat_year}/{sat_month:02d}")
-            return {"year": sat_year, "month": sat_month,
-                    "peak_month": peak_month}
-        else:
-            print("  Capacity not reached within 100 years")
-            return {"year": None, "month": None, "peak_month": peak_month}
+        print("  Saturation  : not reached within 100 years")
+        return {**base_result, "year": None, "month": None}
 
     # ── Population-based ──────────────────────────────────────────────
     else:
         monthly_rate, _, _, slope_std_err, _ = estimate_growth_rate(area_df)
         P0 = area_df["population"].iloc[-1]
 
-        def water_minus_capacity(population):
-            pop_val = np.log(population) if is_log else population
-            X_probe = build_probe_row(
-                area_id, pop_val, peak_month, capacity,
-                feature_set, is_log, all_area_ids, features
-            )
-            pred = best_pipeline.predict(X_probe)[0]
-            if is_log:
-                pred = np.exp(pred) * smearing_factor
-            return pred - capacity
+        def water_minus_capacity(pop):
+            pop_val = np.log(pop) if is_log else pop
+            X       = build_probe_row(area_id, pop_val, peak_month, capacity,
+                                      feature_set, is_log, all_area_ids, features)
+            pred    = best_pipeline.predict(X)[0]
+            return (np.exp(pred) * smearing_factor if is_log else pred) - capacity
 
         if water_minus_capacity(P0) > 0:
-            print("  ⚠ Current population already exceeds capacity")
-            return {"year": None, "month": None,
-                    "peak_month": peak_month,
+            print("  ⚠ Already exceeds capacity at current population")
+            return {**base_result, "year": None, "month": None,
                     "warning": "already_exceeded"}
 
-        # Expand upper bound until root is bracketed
         P_high = P0 * 2
         for _ in range(20):
             if water_minus_capacity(P_high) > 0:
                 break
             P_high *= 2
         else:
-            print("  ⚠ Capacity not reached within reasonable population range")
-            return {"year": None, "month": None, "peak_month": peak_month}
+            print("  Saturation not reached within reasonable population range")
+            return {**base_result, "year": None, "month": None}
 
-        pop_max = brentq(water_minus_capacity, P0, P_high, xtol=1.0)
-
-        # Convert population to date — 3 scenarios for uncertainty
+        pop_max   = brentq(water_minus_capacity, P0, P_high, xtol=1.0)
         scenarios = {}
-        for label, rate_adj in [("pessimistic", -slope_std_err),
-                                 ("expected",     0),
-                                 ("optimistic",  +slope_std_err)]:
-            adj_annual  = np.exp(slope_std_err * rate_adj
+
+        for label, adj in [("pessimistic", -slope_std_err),
+                            ("expected",    0),
+                            ("optimistic",  +slope_std_err)]:
+            adj_annual  = np.exp(slope_std_err * adj
                                  + np.log(1 + monthly_rate * 12)) - 1
             adj_monthly = (1 + adj_annual) ** (1 / 12) - 1
 
@@ -645,124 +769,106 @@ def find_saturation_for_area(best_pipeline, features, feature_set,
             months_diff = np.log(pop_max / P0) / np.log(1 + adj_monthly)
             scenarios[label] = {
                 "year":  int(area_df["year"].iloc[-1] + months_diff // 12),
-                "month": int((months_diff % 12) + 1)
+                "month": int((months_diff % 12) + 1),
             }
+            print(f"  {label:<14}: {scenarios[label]['year']}/"
+                  f"{scenarios[label]['month']:02d}")
 
-        print(f"  Saturation population : {int(pop_max):,}")
-        for label, val in scenarios.items():
-            if val["year"]:
-                print(f"  {label:<14} : {val['year']}/{val['month']:02d}")
-
-        return {"pop_max": int(pop_max), "scenarios": scenarios,
-                "peak_month": peak_month}
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# STEP 11 — FEATURE IMPORTANCE
-# ═══════════════════════════════════════════════════════════════════════
-
-def print_feature_importance(best_name, best_pipeline, features):
-    """
-    Tree models expose feature_importances_ — prints a ranked bar chart.
-    If total_capacity or area dummies dominate over year/population,
-    the model is learning infrastructure differences more than demand trends.
-    """
-    if best_name not in TREE_MODELS:
-        return
-
-    print(f"\n── Feature importance ({best_name}) ────────────────────────")
-    importances = best_pipeline.named_steps["model"].feature_importances_
-
-    for feat, imp in sorted(zip(features, importances), key=lambda x: -x[1]):
-        bar = "█" * int(imp * 40)
-        print(f"  {feat:<28} {imp:.4f}  {bar}")
+        return {**base_result, "pop_max": int(pop_max), "scenarios": scenarios}
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # MAIN ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════
 
-def run_forecast(df, area_capacities, requested_area_id):
+def run_forecast(df, area_capacities, requested_area_id, area_names=None):
     """
-    Combined model for all service areas.
+    Combined time-based forecast for all service areas.
 
     Parameters
     ----------
-    df                : DataFrame with columns:
-                        year, month, total_water, population,
-                        area_id, total_capacity
-                        Must NOT be pre-sorted — sorting is done here.
-    area_capacities   : dict {area_id: total_capacity}
-    requested_area_id : int — the area from the POST request
+    df                : DataFrame — year, month, total_water, population,
+                                    area_id, total_capacity
+    area_capacities   : dict {area_id: capacity}
+    requested_area_id : int — area from the POST request
+    area_names        : dict {area_id: name} — optional
 
     Returns
     -------
-    dict with:
-        best_model                  : winning model name
-        cv_r2_mean / cv_r2_std      : cross-validation scores
-        final_r2 / final_mae        : holdout test scores
-        requested_area_saturation   : saturation result for requested area
-        all_areas_saturation        : saturation for every area
-        at_risk_areas               : areas saturating within 10 years, sorted
+    dict with model info, data quality, evaluation metrics,
+    per-area saturation sorted by urgency, and requested area result
     """
     print(f"\n{'═' * 60}")
     print(f"  WATER DEMAND FORECAST — Combined Model")
     print(f"  Requested area : {requested_area_id}")
     print(f"{'═' * 60}")
 
-    # ── 1. Validate ───────────────────────────────────────────────────
-    validate_inputs(df)
+    # ── 1. Data quality report ────────────────────────────────────────
+    quality = data_quality_report(df)
 
-    # ── 2. Feature engineering + time sort ───────────────────────────
-    # original_df keeps area_id as integer for saturation calculations
-    # df gets one-hot encoded and is used for all ML steps
-    original_df = df.copy()
-    original_df = original_df.sort_values(
+    # ── 2. Area names ─────────────────────────────────────────────────
+    all_area_ids_raw = sorted(df["area_id"].unique().tolist())
+    if area_names is None:
+        area_names = {aid: str(aid) for aid in all_area_ids_raw}
+
+    # ── 3. Feature engineering ────────────────────────────────────────
+    original_df  = df.copy()
+    original_df  = original_df.sort_values(
         ["year", "month", "area_id"]
     ).reset_index(drop=True)
 
-    df          = engineer_features(df)
+    df           = engineer_features(df)
     all_area_ids = sorted(original_df["area_id"].unique().tolist())
+    print(f"\n  Areas : {all_area_ids}")
 
-    print(f"  Areas in model : {all_area_ids}")
-
-    # ── 3. CV splitter ────────────────────────────────────────────────
-    # n_splits capped so each fold has at least 6 rows
-    # gap=1 leaves one time slice between train and test to avoid
-    # leakage from autocorrelated consecutive months
+    # ── 4. CV splitter ────────────────────────────────────────────────
+    # Scale splits to data size — at least 6 rows per fold
     n_splits = min(5, len(df) // 6)
     cv       = TimeSeriesSplit(n_splits=n_splits, gap=1)
-    print(f"  CV splits      : {n_splits}")
+    print(f"  CV splits : {n_splits}")
 
-    # ── 4. Select feature set ─────────────────────────────────────────
+    # ── 5. Feature set selection ──────────────────────────────────────
     feature_set = select_feature_set(df, cv)
 
-    # ── 5. Validate CV folds — confirm all areas in every fold ────────
+    # ── 6. Validate CV folds ──────────────────────────────────────────
     area_dummy_cols = [c for c in df.columns if c.startswith("area_id_")]
-    probe_features  = (["year", "month_sin", "month_cos", "log_capacity"]
-                       + area_dummy_cols)
-    validate_cv_folds(df, cv, probe_features)
+    validate_cv_folds(df, cv,
+                      ["year", "month_sin", "month_cos", "log_capacity"]
+                      + area_dummy_cols)
 
-    # ── 6. Model race ─────────────────────────────────────────────────
+    # ── 7. Model race ─────────────────────────────────────────────────
     race_results, best_name = run_model_race(df, feature_set, cv)
     best_info               = race_results[best_name]
 
-    # ── 7. Tune best model ────────────────────────────────────────────
+    # ── 8. Tune best model ────────────────────────────────────────────
     best_pipeline = tune_best_model(best_name, best_info, df, cv)
 
-    # ── 8. Final evaluation ───────────────────────────────────────────
+    # ── 9. Final evaluation ───────────────────────────────────────────
     smearing_factor, final_r2, final_mae = evaluate_final_model(
         best_pipeline, best_info, df
     )
 
-    # Refit on ALL data after evaluation so saturation predictions
-    # use the maximum available information
+    # Refit on ALL data so predictions use maximum information
     best_pipeline.fit(df[best_info["features"]], best_info["target"])
 
-    # ── 9. Feature importance ─────────────────────────────────────────
+    # ── 10. Meaningful metrics ────────────────────────────────────────
+    trend_acc  = evaluate_trend_accuracy(
+        best_pipeline, best_info, original_df,
+        all_area_ids, smearing_factor, feature_set, area_names
+    )
+    util_err   = evaluate_utilization_accuracy(
+        best_pipeline, best_info, original_df,
+        all_area_ids, smearing_factor, feature_set, area_names
+    )
+    mape       = evaluate_mape(
+        best_pipeline, best_info, original_df,
+        all_area_ids, smearing_factor, feature_set, area_names
+    )
+
+    # ── 11. Feature importance ────────────────────────────────────────
     print_feature_importance(best_name, best_pipeline, best_info["features"])
 
-    # ── 10. Save model ────────────────────────────────────────────────
+    # ── 12. Save model ────────────────────────────────────────────────
     joblib.dump(best_pipeline, MODEL_PATH)
     joblib.dump({
         "features":        best_info["features"],
@@ -771,70 +877,80 @@ def run_forecast(df, area_capacities, requested_area_id):
         "smearing_factor": smearing_factor,
         "all_area_ids":    all_area_ids,
         "best_name":       best_name,
+        "area_names":      area_names,
     }, METADATA_PATH)
     print(f"\n✓ Model saved → {MODEL_PATH}")
 
-    # ── 11. Per-area saturation ───────────────────────────────────────
-    print(f"\n── Saturation analysis (all areas) ────────────────────────")
+    # ── 13. Per-area saturation ───────────────────────────────────────
+    print(f"\n── Saturation analysis ─────────────────────────────────────")
 
     all_areas_saturation  = {}
     requested_area_result = None
 
     for area_id in all_area_ids:
-        # Use original_df (not one-hot encoded) for per-area stats
-        # like population growth rate and reference year
-        area_df  = original_df[original_df["area_id"] == area_id].copy()
-        capacity = area_capacities.get(area_id, 0)
+        area_df   = original_df[original_df["area_id"] == area_id].copy()
+        capacity  = area_capacities.get(area_id, 0)
+        area_name = area_names.get(area_id, str(area_id))
 
         if capacity <= 0:
-            print(f"  ⚠ Area {area_id} has no capacity — skipping")
+            print(f"  ⚠ Area {area_id} — no capacity data, skipping")
             continue
 
         sat = find_saturation_for_area(
             best_pipeline, best_info["features"], feature_set,
             best_info["is_log"], smearing_factor,
-            area_id, area_df, capacity, all_area_ids
+            area_id, area_df, capacity, all_area_ids, area_name
         )
         all_areas_saturation[str(area_id)] = sat
 
         if area_id == requested_area_id:
             requested_area_result = sat
 
-    # ── 12. Rank by urgency ───────────────────────────────────────────
-    def saturation_sort_key(item):
+    # ── 14. Rank by urgency ───────────────────────────────────────────
+    def sort_key(item):
         sat = item[1]
         if feature_set == "year":
             return sat.get("year") or 9999
-        else:
-            expected = sat.get("scenarios", {}).get("expected", {})
-            return expected.get("year") or 9999
+        return (sat.get("scenarios", {})
+                   .get("expected", {})
+                   .get("year") or 9999)
 
-    sorted_areas  = sorted(all_areas_saturation.items(),
-                           key=saturation_sort_key)
-
+    sorted_areas  = sorted(all_areas_saturation.items(), key=sort_key)
     current_year  = int(original_df["year"].max())
+
     at_risk_areas = [
-        {"area_id": aid, "saturation": sat}
+        {
+            "area_id":   aid,
+            "area_name": all_areas_saturation[aid].get("area_name", aid),
+            "saturation": sat,
+        }
         for aid, sat in sorted_areas
-        if saturation_sort_key((aid, sat)) <= current_year + 10
+        if sort_key((aid, sat)) <= current_year + 10
     ]
 
-    print(f"\n── At-risk areas (saturating within 10 years) ─────────────")
+    print(f"\n── At-risk areas (within 10 years) ────────────────────────")
     if at_risk_areas:
         for item in at_risk_areas:
-            print(f"  Area {item['area_id']:<5} → {item['saturation']}")
+            yr = item["saturation"].get("year")
+            mo = item["saturation"].get("month")
+            print(f"  {item['area_name']:<42} → "
+                  f"{yr}/{str(mo).zfill(2) if mo else '??'}")
     else:
-        print("  None — all areas have capacity for 10+ years")
+        print("  None — all areas safe for 10+ years")
 
-    # ── 13. Summary ───────────────────────────────────────────────────
+    # ── 15. Summary ───────────────────────────────────────────────────
     print(f"\n── Summary ─────────────────────────────────────────────────")
-    print(f"  Best model     : {best_name}")
-    print(f"  Feature set    : {feature_set}-based")
-    print(f"  CV R²          : {race_results[best_name]['mean_r2']:.4f} "
+    print(f"  Best model        : {best_name}")
+    print(f"  Feature set       : {feature_set}-based")
+    print(f"  CV R²             : {race_results[best_name]['mean_r2']:.4f} "
           f"± {race_results[best_name]['std_r2']:.4f}")
-    print(f"  Final R²       : {final_r2:.4f}")
-    print(f"  Final MAE      : {final_mae:.2f}")
-    print(f"  Requested area ({requested_area_id}) : {requested_area_result}")
+    print(f"  Final R²          : {final_r2:.4f}")
+    print(f"  Final MAE         : {final_mae:.2f}")
+    print(f"  Trend accuracy    : {trend_acc:.1%}   target >80%")
+    print(f"  Utilization error : {util_err:.1%}   target <10%")
+    print(f"  MAPE              : {mape:.1f}%   target <15%")
+    print(f"  Data reliable     : {'✓ YES' if quality['reliable'] else '✗ NO — ' + str(quality['n_months']) + ' months (need 24)'}")
+    print(f"  Requested area    : {requested_area_result}")
     print(f"{'═' * 60}\n")
 
     return {
@@ -845,6 +961,10 @@ def run_forecast(df, area_capacities, requested_area_id):
         "final_r2":                  round(final_r2,  4),
         "final_mae":                 round(final_mae, 2),
         "smearing_factor":           smearing_factor,
+        "trend_accuracy":            round(trend_acc, 4),
+        "utilization_error":         round(util_err,  4),
+        "mape":                      round(mape, 2),
+        "data_quality":              quality,
         "requested_area_id":         requested_area_id,
         "requested_area_saturation": requested_area_result,
         "all_areas_saturation":      dict(sorted_areas),

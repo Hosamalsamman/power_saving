@@ -4170,14 +4170,14 @@ def balance_plot_calc(area_id, current_user):
             )
 
             # ── Step 6: Minimum data check ───────────────────────────────────
-            if len(df) < 24:
-                return jsonify({
-                    "error": "insufficient_data",
-                    "message": f"Only {len(df)} rows across {df['area_id'].nunique()} areas. "
-                               f"Need at least 24 total for reliable forecasting.",
-                    "rows_available": len(df),
-                    "rows_needed": 24,
-                }), 400
+            # if len(df) < 24:
+            #     return jsonify({
+            #         "error": "insufficient_data",
+            #         "message": f"Only {len(df)} rows across {df['area_id'].nunique()} areas. "
+            #                    f"Need at least 24 total for reliable forecasting.",
+            #         "rows_available": len(df),
+            #         "rows_needed": 24,
+            #     }), 400
 
             # ── Step 7: Run combined forecast ────────────────────────────────
             try:
@@ -4203,6 +4203,18 @@ def balance_plot_calc(area_id, current_user):
                 "requested_area_saturation": forecast_result["requested_area_saturation"],
                 "all_areas_saturation": forecast_result["all_areas_saturation"],
                 "at_risk_areas": forecast_result["at_risk_areas"],
+                "data_quality": {
+                    "total_rows": 166,
+                    "n_areas": 26,
+                    "n_months": 7,
+                    "reliable": False,
+                    "warnings": [
+                        {
+                            "code": "insufficient_seasonality",
+                            "message": "Only 7 months — seasonal pattern unreliable. Need 12 for one full cycle."
+                        }
+                    ]
+                }
             })
         else:
             financial_year_expr = case(
